@@ -6,7 +6,10 @@
 #include <err.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include <mpi.h>
 
+int comm_size;
+int proc_rank;
 
 double start = 0.0;
 
@@ -545,6 +548,13 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 
 int main(int argc, char **argv)
 {
+	MPI_Init(&argc, &argv);
+
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
+
+	printf("Machine %d/%d\n", proc_rank + 1, comm_size);
+
         struct option longopts[5] = {
                 {"in", required_argument, NULL, 'i'},
                 {"progress-report", required_argument, NULL, 'v'},
@@ -582,5 +592,7 @@ int main(int argc, char **argv)
         solve(instance, ctx);
         printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
                         wtime() - start);
+
+		MPI_Finalize();
         exit(EXIT_SUCCESS);
 }
