@@ -7,6 +7,15 @@ int rank;
 int size;
 MPI_Datatype vertex_type;
 
+typedef struct Pixel Pixel;
+typedef struct vertex vertex;
+
+struct Pixel
+{
+	int x;
+	int y;
+};
+
 struct array
 {
 	int len;
@@ -19,7 +28,8 @@ struct vertex
 	bool smooth;
 	float* pos;
 	float* normal;
-	//struct array ** active_options;
+	Pixel * pix;
+	struct array ** active_options;
 };
 
 void create_type(struct vertex* v)
@@ -70,6 +80,12 @@ int main(int argc, char* argv[])
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	struct vertex v;
+	struct Pixel * pix = malloc(sizeof(Pixel));
+	struct array ** active_options = malloc(sizeof(struct array));
+	int nb = 3;
+	for (int i = 0 ; i < nb; i++){
+		active_options[i] = malloc(sizeof(struct array));
+	}
 	v.pos = calloc(3, sizeof(float));
 	v.normal = calloc(3, sizeof(float));
 	if(rank == 0)
@@ -78,19 +94,43 @@ int main(int argc, char* argv[])
 		v.smooth = true;
 		v.pos[0] = 1.0f, v.pos[1] = 2.0f; v.pos[2] = 3.0f;
 		v.normal[0] = 0.0f, v.normal[1] = 1.0f; v.normal[2] = 0.0f;
+		pix->x = 10;
+		pix->y = 10;
+		v.pix = pix;
+		active_options[0]->len = 2;
+		int tmp[2] = {0,1};
+		active_options[0]->options = tmp;
+		active_options[1]->len = 2;
+		int tmp1[2] = {2,3};
+		active_options[1]->options = tmp1;
 	}
 	create_type_ptr(&v);
 
 	if(rank == 0)
 	{
 		MPI_Send(&v, 1, vertex_type, 1, 0, MPI_COMM_WORLD);
+		Pixel *tmp = v.pix;
+		MPI_Send(tmp, sizeof(struct Pixel), MPI_BYTE, 1, 1, MPI_COMM_WORLD);
+		/*
+		struct array ** tmp2 = v.active_options;
+		MPI_Send(tmp2[0], sizeof(struct array), MPI_BYTE, 1, 1, MPI_COMM_WORLD);*/
 	}
 	else if(rank == 1)
 	{
 		MPI_Recv(&v, 1, vertex_type, 0, 0, MPI_COMM_WORLD, NULL);
+		v.pix = malloc(sizeof(struct Pixel));
+		MPI_Recv(v.pix, sizeof(struct Pixel), MPI_BYTE, 0, 1, MPI_COMM_WORLD, NULL);
+
+		/*v.active_options = malloc(sizeof(struct array));
+		int nb = 3;
+		for (int i = 0 ; i < nb; i++){
+			v.active_options[i] = malloc(sizeof(struct array));
+		}
+		MPI_Recv(*(v.active_options), sizeof(struct array), MPI_BYTE, 0, 1, MPI_COMM_WORLD, NULL);*/
 		char* vsmooth = (v.smooth) ? "true" : "false";
 		printf("Processus %d reçoit le vertex : \nindex = %d\nsmooth = %s\n", rank, v.index, vsmooth);
 		printf("pos = (%f,%f,%f)\nnormal = (%f,%f,%f)\n", v.pos[0], v.pos[1], v.pos[2], v.normal[0], v.normal[1], v.normal[2]);
+		printf("pix = (%d,%d)\n", v.pix->x, v.pix->y);
 	}
 
 	free(v.pos);

@@ -78,15 +78,15 @@ void define_mpi_datatype()
 {
 	// sparse_array_t ==========
 	// =========================
-	MPI_Datatype sparseArray_typeCount[1];
+	//MPI_Datatype sparseArray_typeCount[1];
 
 	// context ==========
 	// ==================
-	MPI_Datatype ctx_typeCount[2];
+	//MPI_Datatype ctx_typeCount[2];
 	
 	// instance ==========
 	// ===================
-	MPI_Datatype instance_typeCount[];
+	//MPI_Datatype instance_typeCount[];
 }
 
 double wtime()
@@ -582,9 +582,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 		// if I don't work I wait for a message telling me to work
 		while(!work[proc_rank])
 		{
-			MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
-			MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
-			MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
+			//MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
+			//MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
+			//MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
 		}
 
 		// otherwise, let's go
@@ -610,7 +610,7 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 			if(next_machine != -1)
 			{
 				int num_available_machines = comm_size - next_machine;
-				int dispatch = min(num_available_machines, active_options->len);
+				int dispatch = num_available_machines < active_options->len ? num_available_machines  : active_options->len;
 				int chunk = active_options->len / dispatch;
 				int last_chunk = chunk + (active_options->len % dispatch);
 				

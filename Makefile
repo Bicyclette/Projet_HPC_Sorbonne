@@ -16,9 +16,9 @@ endif
 
 # FILES ==========
 # ================
-SRC = exact_cover.c
+SRC = src/exact_cover.c
 ifdef mpi
-	SRC = exact_cover_mpi.c
+	SRC = src/exact_cover_mpi.c
 endif
 
 OBJ = $(subst %.c,%.o,$(SRC))
@@ -26,7 +26,7 @@ OBJ = $(subst %.c,%.o,$(SRC))
 # TARGETS ==========
 # ==================
 
-PROGRAM = exact_cover
+PROGRAM = src/exact_cover
 
 $(PROGRAM): $(OBJ)
 	$(CC) -o $@ $^ $(CFLAGS)
