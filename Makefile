@@ -14,21 +14,31 @@ else
 	CFLAGS += -O3
 endif
 
+ifdef omp
+	CFLAGS += -fopenmp
+endif
+
 # FILES ==========
 # ================
 SRC = src/exact_cover.c
 ifdef mpi
 	SRC = src/exact_cover_mpi.c
+else
+	ifdef omp
+		SRC = src/exact_cover_omp.c
+	else
+		ifdef final
+			SRC = src/exact_cover_para.c
+		endif
+	endif
 endif
-
-OBJ = $(subst %.c,%.o,$(SRC))
 
 # TARGETS ==========
 # ==================
 
-PROGRAM = src/exact_cover
+PROGRAM = exact_cover
 
-$(PROGRAM): $(OBJ)
+$(PROGRAM): $(SRC)
 	$(CC) -o $@ $^ $(CFLAGS)
 
 clean:
