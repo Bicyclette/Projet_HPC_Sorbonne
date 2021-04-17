@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
 		{
 			v.tab[i]->len = 5;
 			for(int j = 0; j < 5; ++j)
-				v.tab[i]->options[i] = i*2;
+				v.tab[i]->options[j] = j*2;
 		}
 	}
 
@@ -159,6 +159,7 @@ int main(int argc, char* argv[])
 			{
 				printf("%d, ", v.tab[i]->options[j]);
 			}
+			printf("\n");
 		}
 	}
 
