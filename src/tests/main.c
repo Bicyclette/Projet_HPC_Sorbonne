@@ -8,7 +8,6 @@ int size;
 MPI_Datatype vertex_type;
 MPI_Datatype pixel_type;
 MPI_Datatype array_type;
-MPI_Datatype ptr_array_type;
 
 typedef struct Pixel Pixel;
 typedef struct vertex vertex;
@@ -32,7 +31,7 @@ struct vertex
 	float* pos;
 	float* normal;
 	Pixel * pix;
-	struct array * tab;
+	struct array ** tab;
 };
 
 void create_pixel_type(struct Pixel* p)
@@ -69,8 +68,8 @@ void create_array_type(struct array* tab)
 
 void create_vertex_type(struct vertex* v)
 {
-	MPI_Datatype types[6] = {MPI_INT, MPI_C_BOOL, MPI_REAL, MPI_REAL, pixel_type, array_type};
-	int elementsPerType[6] = {1, 1, 3, 3, 1, 1};
+	MPI_Datatype types[5] = {MPI_INT, MPI_C_BOOL, MPI_REAL, MPI_REAL, pixel_type};
+	int elementsPerType[5] = {1, 1, 3, 3, 1};
 	MPI_Aint rootAddr;
 	MPI_Get_address(v, &rootAddr);
 	MPI_Aint addr1;
@@ -83,11 +82,9 @@ void create_vertex_type(struct vertex* v)
 	MPI_Get_address(v->normal, &addr4);
 	MPI_Aint addr5;
 	MPI_Get_address(v->pix, &addr5);
-	MPI_Aint addr6;
-	MPI_Get_address(v->tab, &addr6);
-	MPI_Aint addresses[6] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr, addr5 - rootAddr, addr6 - rootAddr};
+	MPI_Aint addresses[5] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr, addr5 - rootAddr};
 
-	MPI_Type_create_struct(6, elementsPerType, addresses, types, &vertex_type);
+	MPI_Type_create_struct(5, elementsPerType, addresses, types, &vertex_type);
 	MPI_Type_commit(&vertex_type);
 }
 
@@ -108,8 +105,12 @@ int main(int argc, char* argv[])
 	v.pos = calloc(3, sizeof(float));
 	v.normal = calloc(3, sizeof(float));
 	v.pix = malloc(sizeof(Pixel));
-	v.tab = malloc(sizeof(struct array));
-	v.tab->options = malloc(5 * sizeof(int));
+	v.tab = malloc(3 * sizeof(struct array*));
+	for(int i = 0; i < 3; ++i)
+	{
+		v.tab[i] = malloc(sizeof(struct array));
+		v.tab[i]->options = malloc(5 * sizeof(int));
+	}
 
 	if(rank == 0)
 	{
@@ -119,30 +120,46 @@ int main(int argc, char* argv[])
 		v.normal[0] = 0.0f, v.normal[1] = 1.0f; v.normal[2] = 0.0f;
 		v.pix->x = 10;
 		v.pix->y = 10;
-		v.tab->len = 5;
-		for(int i = 0; i < 5; ++i)
-			v.tab->options[i] = i*2;
+		for(int i = 0; i < 3; ++i)
+		{
+			v.tab[i]->len = 5;
+			for(int j = 0; j < 5; ++j)
+				v.tab[i]->options[i] = i*2;
+		}
 	}
 
 	create_pixel_type(v.pix);
-	create_array_type(v.tab);
+	create_array_type(v.tab[0]);
 	create_vertex_type(&v);
 
 	if(rank == 0)
 	{
 		MPI_Send(&v, 1, vertex_type, 1, 0, MPI_COMM_WORLD);
+		for(int i = 0; i < 3; ++i)
+		{
+			MPI_Send(v.tab[i], 1, array_type, 1, 0, MPI_COMM_WORLD);
+		}
 	}
 	else if(rank == 1)
 	{
 		MPI_Recv(&v, 1, vertex_type, 0, 0, MPI_COMM_WORLD, NULL);
+		for(int i = 0; i < 3; ++i)
+		{
+			MPI_Recv(v.tab[i], 1, array_type, 0, 0, MPI_COMM_WORLD, NULL);
+		}
 		char* vsmooth = (v.smooth) ? "true" : "false";
 		printf("Processus %d reçoit le vertex : \nindex = %d\nsmooth = %s\n", rank, v.index, vsmooth);
 		printf("pos = (%f,%f,%f)\nnormal = (%f,%f,%f)\n", v.pos[0], v.pos[1], v.pos[2], v.normal[0], v.normal[1], v.normal[2]);
 		printf("pix = (%d,%d)\n", v.pix->x, v.pix->y);
-		printf("len = %d, ", v.tab->len);
-		printf("options : ");
-		for(int i = 0; i < 5; ++i)
-			printf("%d, ", v.tab->options[i]);
+
+		for(int i = 0; i < 3; ++i)
+		{
+			printf("option %d : ", i+1);
+			for(int j = 0; j < 5; ++j)
+			{
+				printf("%d, ", v.tab[i]->options[j]);
+			}
+		}
 	}
 
 	free(v.pos);
