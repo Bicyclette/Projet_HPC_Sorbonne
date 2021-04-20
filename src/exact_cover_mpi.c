@@ -557,8 +557,9 @@ struct instance_t * load_matrix(const char *filename)
 
 
         fclose(in);
-        fprintf(stderr, "Lu %d objets (%d principaux) et %d options\n", 
-                instance->n_items, instance->n_primary, instance->n_options);
+        if (proc_rank ==0)
+                fprintf(stderr, "Lu %d objets (%d principaux) et %d options\n", 
+                        instance->n_items, instance->n_primary, instance->n_options);
         return instance;
 }
 
@@ -727,15 +728,12 @@ int main(int argc, char **argv)
 	
         solve(instance, ctx);
 
-
-        
         // wait all threads
-        //MPI_Barrier(MPI_COMM_WORLD); // gather -> 0 sum solution
         long long solution;
         MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         free_type();
-
-        printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
+        if (proc_rank == 0)
+                printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
                         wtime() - start);
         
 	MPI_Finalize();
