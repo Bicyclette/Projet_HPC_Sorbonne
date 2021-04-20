@@ -618,7 +618,7 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         int begin = 0;
         int end = active_options->len;
         
-        if(proc_rank != 0){
+        if(proc_rank != 0 && !split){
                 MPI_Recv(&chosen_item, 1, MPI_INT, MPI_ANY_SOURCE, ITEM_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(ctx, 1, ctx_type, MPI_ANY_SOURCE, CONTEXT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 for(int i = 0; i < instance->n_items; i++) {
@@ -651,6 +651,23 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                 }
         }
 
+        // work
+        for (int k = begin; k < end; k++) {
+                int option = active_options->p[k];
+                ctx->child_num[ctx->level] = k;
+                choose_option(instance, ctx, option, chosen_item);
+                solve(instance, ctx);
+                if (ctx->solutions >= max_solutions)
+                        return;
+                unchoose_option(instance, ctx, option, chosen_item);
+        }
+        
+        // uncover
+        if((split && proc_rank==0)){
+                uncover(instance, ctx, chosen_item);                      /* backtrack */
+        } else{
+                uncover(instance, ctx, chosen_item);                      /* backtrack */
+        }
         /*for (int i =0; i < instance->n_items; i++)
                 printf("Active options %d\t", ctx->active_options[i]->len);
         printf("item %d\n", chosen_item);
@@ -709,14 +726,18 @@ int main(int argc, char **argv)
         create_ctx_type(ctx, instance);
 	
         solve(instance, ctx);
+
+
         
         // wait all threads
-        MPI_Barrier(MPI_COMM_WORLD); // gather -> 0 sum solution
+        //MPI_Barrier(MPI_COMM_WORLD); // gather -> 0 sum solution
+        long long solution;
+        MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
         free_type();
 
-        printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
+        printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
                         wtime() - start);
-
+        
 	MPI_Finalize();
         exit(EXIT_SUCCESS);
 }
