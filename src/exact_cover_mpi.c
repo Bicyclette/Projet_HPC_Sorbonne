@@ -58,7 +58,8 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
 // CUSTOM MPI DATATYPE 
 MPI_Datatype ctx_type;
-MPI_Datatype active_obj_type;
+MPI_Datatype active_item_type;
+MPI_Datatype active_option_type;
 
 enum MSG_TAG
 {
@@ -69,11 +70,16 @@ enum MSG_TAG
         CHUNK_STATUS
 };
 
-void create_active_obj_type(struct sparse_array_t* active_obj)
+void create_active_obj_type(struct sparse_array_t* active_obj, struct instance_t * instance, bool item)
 {
-        int nb_obj = active_obj->capacity;
+        int nb_obj; 
 	MPI_Datatype types[4] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT};
-	int elementsPerType[4] = {1, 1, nb_obj, nb_obj};
+	if(item){
+                nb_obj = active_obj->capacity;
+        } else{
+                nb_obj = instance->n_options;
+        }
+        int elementsPerType[4] = {1, 1, nb_obj, nb_obj};
 	MPI_Aint rootAddr;
 	MPI_Get_address(active_obj, &rootAddr);
 	MPI_Aint addr1;
@@ -86,15 +92,21 @@ void create_active_obj_type(struct sparse_array_t* active_obj)
 	MPI_Get_address(active_obj->q, &addr4);
 	MPI_Aint addresses[4] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr};
 
-	MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_obj_type);
-	MPI_Type_commit(&active_obj_type);
+        if (item){
+                MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_item_type);
+	        MPI_Type_commit(&active_item_type);
+        } else {
+                MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_option_type);
+	        MPI_Type_commit(&active_option_type);
+        }
+	
 }
 
 void create_ctx_type(struct context_t* ctx, struct instance_t * instance)
 {
         int n_items = instance->n_items;
-	MPI_Datatype types[7] = {active_obj_type, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_LONG_LONG, MPI_LONG_LONG};
-	int elementsPerType[7] = {n_items, n_items, n_items, n_items, 1, 1, 1};
+	MPI_Datatype types[7] = {active_item_type, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_LONG_LONG, MPI_LONG_LONG};
+	int elementsPerType[7] = {1, n_items, n_items, n_items, 1, 1, 1};
 
 	MPI_Aint rootAddr;
 	MPI_Get_address(ctx, &rootAddr);
@@ -120,7 +132,7 @@ void create_ctx_type(struct context_t* ctx, struct instance_t * instance)
 
 void free_type()
 {
-	MPI_Type_free(&active_obj_type);
+	MPI_Type_free(&active_item_type);
 	MPI_Type_free(&ctx_type);
 }
 /* FONCTION MPI DATATYPE*/
@@ -569,6 +581,7 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
                 || ctx->child_num == NULL || ctx->num_children == NULL)
                 err(1, "impossible d'allouer le contexte");
         ctx->active_items = sparse_array_init(n);
+
         for (int item = 0; item < instance->n_primary; item++)
                 sparse_array_add(ctx->active_items, item);
 
@@ -608,9 +621,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         if(proc_rank != 0){
                 MPI_Recv(&chosen_item, 1, MPI_INT, MPI_ANY_SOURCE, ITEM_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(ctx, 1, ctx_type, MPI_ANY_SOURCE, CONTEXT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                /*for(int i = 0; i < instance->n_items; i++) {
-                        MPI_Recv(ctx->active_options[i], 1, active_obj_type, MPI_ANY_SOURCE, CONTEXT_AO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                }*/
+                for(int i = 0; i < instance->n_items; i++) {
+                        MPI_Recv(ctx->active_options[i], 1, active_option_type, MPI_ANY_SOURCE, CONTEXT_AO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                }
                 MPI_Recv(&begin, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(&end, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
@@ -628,9 +641,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 
                                 MPI_Send(&chosen_item, 1, MPI_INT, i, ITEM_STATUS, MPI_COMM_WORLD);
                                 MPI_Send(ctx, 1, ctx_type, i, CONTEXT, MPI_COMM_WORLD);
-                                /*for(int j = 0; j < instance->n_items; j++) {
-                                        MPI_Send(ctx->active_options[j], 1, active_obj_type, i, CONTEXT_AO, MPI_COMM_WORLD);
-                                }*/
+                                for(int j = 0; j < instance->n_items; j++) {
+                                        MPI_Send(ctx->active_options[j], 1, active_option_type, i, CONTEXT_AO, MPI_COMM_WORLD);
+                                }
                                 MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
                                 MPI_Send(&local_end, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
                         }
@@ -638,14 +651,14 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                 }
         }
 
-        printf("rank %d\n", proc_rank);
-
-
-
-
-
-
-                
+        /*for (int i =0; i < instance->n_items; i++)
+                printf("Active options %d\t", ctx->active_options[i]->len);
+        printf("item %d\n", chosen_item);
+        printf("nodes %lld\n", ctx->nodes);
+        printf("solutions %lld\n", ctx->solutions);
+        for (int i =0; i < instance->n_items; i++)
+                printf("Active items %d\t", ctx->active_items->p[i]);
+        printf("begin  : %d end : %d\n", begin, end);*/      
 }
 
 int main(int argc, char **argv)
@@ -691,7 +704,8 @@ int main(int argc, char **argv)
         start = wtime();
         
         // CUSTOM DATATYPE FOR MPI
-	create_active_obj_type(ctx->active_items);
+	create_active_obj_type(ctx->active_items, instance, true);
+	create_active_obj_type(ctx->active_options[0], instance, false);
         create_ctx_type(ctx, instance);
 	
         solve(instance, ctx);
