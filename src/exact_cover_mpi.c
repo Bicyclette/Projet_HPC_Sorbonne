@@ -10,10 +10,7 @@
 
 int comm_size;
 int proc_rank;
-bool* work;
-
-MPI_Datatype mpi_sparse_array_type;
-MPI_Datatype mpi_context_type;
+bool split = false;
 
 double start = 0.0;
 
@@ -59,75 +56,74 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
                                 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
                                 'U', 'V', 'W', 'X', 'Y', 'Z'};
 
+// CUSTOM MPI DATATYPE 
+MPI_Datatype ctx_type;
+MPI_Datatype active_obj_type;
+
 enum MSG_TAG
 {
-	WORK_STATUS,
 	NODE,
 	CONTEXT,
-	SPARSE_ARRAY
+        CONTEXT_AO,
+        ITEM_STATUS,
+        CHUNK_STATUS
 };
 
-int can_assign_work()
+void create_active_obj_type(struct sparse_array_t* active_obj)
 {
-	for(int i = 0; i < comm_size; ++i)
-	{
-		if(work[i] == false)
-			return i;
-	}
-	return -1;
-}
-
-void define_mpi_sparse_array_type(struct sparse_array_t * tab)
-{
+        int nb_obj = active_obj->capacity;
 	MPI_Datatype types[4] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT};
-	int elementsPerType[4] = {1, 1, tab->capacity, tab->capacity};
-	
+	int elementsPerType[4] = {1, 1, nb_obj, nb_obj};
 	MPI_Aint rootAddr;
+	MPI_Get_address(active_obj, &rootAddr);
 	MPI_Aint addr1;
+	MPI_Get_address(&active_obj->len, &addr1);
 	MPI_Aint addr2;
+	MPI_Get_address(&active_obj->capacity, &addr2);
 	MPI_Aint addr3;
+	MPI_Get_address(active_obj->p, &addr3);
 	MPI_Aint addr4;
-
-	MPI_Get_address(tab, &rootAddr);
-	MPI_Get_address(&tab->len, &addr1);
-	MPI_Get_address(&tab->capacity, &addr2);
-	MPI_Get_address(tab->p, &addr3);
-	MPI_Get_address(tab->q, &addr4);
+	MPI_Get_address(active_obj->q, &addr4);
 	MPI_Aint addresses[4] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr};
-	
-	MPI_Type_create_struct(4, elementsPerType, addresses, types, &mpi_sparse_array_type);
-	MPI_Type_commit(&mpi_sparse_array_type);
+
+	MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_obj_type);
+	MPI_Type_commit(&active_obj_type);
 }
 
-void define_mpi_context_type(struct context_t * ctx, struct instance_t * instance)
+void create_ctx_type(struct context_t* ctx, struct instance_t * instance)
 {
-	int n_items = instance->n_items;
-
-	MPI_Datatype types[7] = {mpi_sparse_array_type, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_LONG_LONG, MPI_LONG_LONG};
+        int n_items = instance->n_items;
+	MPI_Datatype types[7] = {active_obj_type, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_LONG_LONG, MPI_LONG_LONG};
 	int elementsPerType[7] = {n_items, n_items, n_items, n_items, 1, 1, 1};
-	
-	MPI_Aint rootAddr;
-	MPI_Aint addr1;
-	MPI_Aint addr2;
-	MPI_Aint addr3;
-	MPI_Aint addr4;
-	MPI_Aint addr5;
-	MPI_Aint addr6;
-	MPI_Aint addr7;
 
+	MPI_Aint rootAddr;
 	MPI_Get_address(ctx, &rootAddr);
+	MPI_Aint addr1;
 	MPI_Get_address(ctx->active_items, &addr1);
+	MPI_Aint addr2;
 	MPI_Get_address(ctx->chosen_options, &addr2);
+	MPI_Aint addr3;
 	MPI_Get_address(ctx->child_num, &addr3);
+	MPI_Aint addr4;
 	MPI_Get_address(ctx->num_children, &addr4);
+	MPI_Aint addr5;
 	MPI_Get_address(&ctx->level, &addr5);
+	MPI_Aint addr6;
 	MPI_Get_address(&ctx->nodes, &addr6);
+	MPI_Aint addr7;
 	MPI_Get_address(&ctx->solutions, &addr7);
 	MPI_Aint addresses[7] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr, addr5 - rootAddr, addr6 - rootAddr, addr7 - rootAddr};
-	
-	MPI_Type_create_struct(7, elementsPerType, addresses, types, &mpi_context_type);
-	MPI_Type_commit(&mpi_context_type);
+
+	MPI_Type_create_struct(7, elementsPerType, addresses, types, &ctx_type);
+	MPI_Type_commit(&ctx_type);
 }
+
+void free_type()
+{
+	MPI_Type_free(&active_obj_type);
+	MPI_Type_free(&ctx_type);
+}
+/* FONCTION MPI DATATYPE*/
 
 double wtime()
 {
@@ -250,17 +246,17 @@ void solution_found(const struct instance_t *instance, struct context_t *ctx)
 
 void cover(const struct instance_t *instance, struct context_t *ctx, int item);
 
-void choose_option(const struct instance_t *instance, struct context_t *ctx, int option, int chosen_item)
+void choose_option(const struct instance_t *instance, struct context_t *ctx, 
+                        int option, int chosen_item)
 {
-	ctx->chosen_options[ctx->level] = option;
-	ctx->level++;
-	for (int p = instance->ptr[option]; p < instance->ptr[option + 1]; p++)
-	{
-		int item = instance->options[p];
-		if (item == chosen_item)
-			continue;
-		cover(instance, ctx, item);
-	}
+        ctx->chosen_options[ctx->level] = option;
+        ctx->level++;
+        for (int p = instance->ptr[option]; p < instance->ptr[option + 1]; p++) {
+                int item = instance->options[p];
+                if (item == chosen_item)
+                        continue;
+                cover(instance, ctx, item);
+        }
 }
 
 void uncover(const struct instance_t *instance, struct context_t *ctx, int item);
@@ -276,7 +272,6 @@ void unchoose_option(const struct instance_t *instance, struct context_t *ctx,
         }
         ctx->level--;
 }
-
 
 int choose_next_item(struct context_t *ctx)
 {
@@ -584,99 +579,73 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
                         int item = instance->options[k];
                         sparse_array_add(ctx->active_options[item], option);
                 }
-
-
-
         return ctx;
 }
 
-// Keep track of :
-// - chosen_item
-// - struct context_t
-
 void solve(const struct instance_t *instance, struct context_t *ctx)
-{
+{	
+
         ctx->nodes++;
         if (ctx->nodes == next_report)
-		{
-			progress_report(ctx);
-		}
-        if (sparse_array_empty(ctx->active_items))
-		{
-			solution_found(instance, ctx);
-			return;                         /* succès : plus d'objet actif */
+                progress_report(ctx);
+        if (sparse_array_empty(ctx->active_items)) {
+                solution_found(instance, ctx);
+                return;                         /* succès : plus d'objet actif */
         }
         int chosen_item = choose_next_item(ctx);
+        
         struct sparse_array_t *active_options = ctx->active_options[chosen_item];
-        if (sparse_array_empty(active_options))
-		{
-			return;           /* échec : impossible de couvrir chosen_item */
-		}
-		cover(instance, ctx, chosen_item);
+        if (sparse_array_empty(active_options)){
+                return;           /* échec : impossible de couvrir chosen_item */
+        }
+        cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
-		
-		// separate work load for each machines ==========
-		// ===============================================
-/*
-		// if I don't work I wait for a message telling me to work
-		while(!work[proc_rank])
-		{
-			MPI_Recv(work, comm_size, MPI_C_BOOL, MPI_ANY, WORK_STATUS, MPI_COMM_WORLD, NULL);
-			MPI_Recv(&chosen_item, 1, MPI_INT, MPI_ANY, NODE, MPI_COMM_WORLD, NULL);
-			MPI_Recv(ctx, 1, mpi_context_type, MPI_ANY, CONTEXT, MPI_COMM_WORLD, NULL);
-			for(int j = 0; j < num_objetcs; ++j)
-			{
-				MPI_Recv(ctx->, 1, mpi_sparse_array_type, MPI_ANY, SPARSE_ARRAY, MPI_COMM_WORLD, NULL);
-			}
-		}
 
-		// otherwise, let's go
-		int begin;
-		int end;
-		int next_machine = proc_rank;
-		if(active_options->len == 1)
-		{*/
-        	for (int k = 0; k < active_options->len; k++)
-			{
-				int option = active_options->p[k];
-				ctx->child_num[ctx->level] = k;
-				choose_option(instance, ctx, option, chosen_item);
-				solve(instance, ctx);
-				if (ctx->solutions >= max_solutions)
-					return;
-				unchoose_option(instance, ctx, option, chosen_item);
-        	}
-		/*}
-		else
-		{
-			next_machine = can_assign_work();
-			if(next_machine != -1)
-			{
-				int num_available_machines = comm_size - next_machine;
-				int dispatch = num_available_machines < active_options->len ? num_available_machines  : active_options->len;
-				int chunk = active_options->len / dispatch;
-				int last_chunk = chunk + (active_options->len % dispatch);
-				
-				// send to machines that are not working that they now must work
-				for(int i = proc_rank; i < dispatch; ++i)
-				{
-					work[i] = true;
-				}
-				for(int i = 0; i < comm_size; ++i)
-				{
-					MPI_Send(work, comm_size, MPI_C_BOOL, i, WORK_STATUS, MPI_COMM_WORLD);
-					MPI_Send(&chosen_item, 1, MPI_INT, i, NODE, MPI_COMM_WORLD);
-					MPI_Send(ctx, 1, mpi_context_type, i, CONTEXT, MPI_COMM_WORLD);
-					for(int j = 0; j < num_objetcs; ++j)
-					{
-						MPI_Send(ctx->, 1, mpi_sparse_array_type, i, SPARSE_ARRAY, MPI_COMM_WORLD);
-					}
-				}
-			}
-		}
+        // block de communication
+        int begin = 0;
+        int end = active_options->len;
+        
+        if(proc_rank != 0){
+                MPI_Recv(&chosen_item, 1, MPI_INT, MPI_ANY_SOURCE, ITEM_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(ctx, 1, ctx_type, MPI_ANY_SOURCE, CONTEXT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                /*for(int i = 0; i < instance->n_items; i++) {
+                        MPI_Recv(ctx->active_options[i], 1, active_obj_type, MPI_ANY_SOURCE, CONTEXT_AO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                }*/
+                MPI_Recv(&begin, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&end, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-		if(proc_rank == next_machine - 1)*/
-        	uncover(instance, ctx, chosen_item);                      /* backtrack */
+                split = true;
+        }
+        if (proc_rank == 0){
+                if(active_options->len >= comm_size && !split){
+                        int chunk = active_options->len/comm_size;
+                        int last_chunk = chunk + (active_options->len % comm_size);
+                        end = chunk;
+
+                        for (int i = 1; i < comm_size; i++){
+                                int local_begin = chunk * i;
+                                int local_end = ( (i + 1) == comm_size ) ? chunk * i + last_chunk : chunk * (i + 1);
+
+                                MPI_Send(&chosen_item, 1, MPI_INT, i, ITEM_STATUS, MPI_COMM_WORLD);
+                                MPI_Send(ctx, 1, ctx_type, i, CONTEXT, MPI_COMM_WORLD);
+                                /*for(int j = 0; j < instance->n_items; j++) {
+                                        MPI_Send(ctx->active_options[j], 1, active_obj_type, i, CONTEXT_AO, MPI_COMM_WORLD);
+                                }*/
+                                MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
+                                MPI_Send(&local_end, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
+                        }
+                        split = true;
+                }
+        }
+
+        printf("rank %d\n", proc_rank);
+
+
+
+
+
+
+                
 }
 
 int main(int argc, char **argv)
@@ -686,64 +655,54 @@ int main(int argc, char **argv)
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
 
-	work = calloc(comm_size, sizeof(bool));
-	work[0] = true;
+	struct option longopts[5] = {
+                {"in", required_argument, NULL, 'i'},
+                {"progress-report", required_argument, NULL, 'v'},
+                {"print-solutions", no_argument, NULL, 'p'},
+                {"stop-after", required_argument, NULL, 's'},
+                {NULL, 0, NULL, 0}
+        };
+        char ch;
+        while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
+                switch (ch) {
+                case 'i':
+                        in_filename = optarg;
+                        break;
+                case 'p':
+                        print_solutions = true;
+                        break;
+                case 's':
+                        max_solutions = atoll(optarg);
+                        break;
+                case 'v':
+                        report_delta = atoll(optarg);
+                        break;          
+                default:
+                        errx(1, "Unknown option\n");
+                }
+        }
+        if (in_filename == NULL)
+                usage(argv);
+        next_report = report_delta;
 
-	printf("Machine %d/%d", proc_rank + 1, comm_size);
-	if(work[proc_rank])
-		printf(" is working !\n");
-	else
-		printf(" is not working !\n");
+
+        struct instance_t * instance = load_matrix(in_filename);
+        struct context_t * ctx = backtracking_setup(instance);
+        start = wtime();
         
-	struct option longopts[5] =
-	{
-		{"in", required_argument, NULL, 'i'},
-		{"progress-report", required_argument, NULL, 'v'},
-		{"print-solutions", no_argument, NULL, 'p'},
-		{"stop-after", required_argument, NULL, 's'},
-		{NULL, 0, NULL, 0}
-	};
+        // CUSTOM DATATYPE FOR MPI
+	create_active_obj_type(ctx->active_items);
+        create_ctx_type(ctx, instance);
 	
-	char ch;
-	while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1)
-	{
-		switch (ch)
-		{
-			case 'i':
-				in_filename = optarg;
-				break;
-			case 'p':
-				print_solutions = true;
-				break;
-			case 's':
-				max_solutions = atoll(optarg);
-				break;
-			case 'v':
-				report_delta = atoll(optarg);
-				break;
-			default:
-				errx(1, "Unknown option\n");
-		}
-	}
-	if (in_filename == NULL)
-		usage(argv);
-	next_report = report_delta;
+        solve(instance, ctx);
+        
+        // wait all threads
+        MPI_Barrier(MPI_COMM_WORLD); // gather -> 0 sum solution
+        free_type();
 
-	struct instance_t * instance = load_matrix(in_filename);
-	struct context_t * ctx = backtracking_setup(instance);
-	
-	// >>>>>>>>>> DEFINE CUSTOM DATATYPE FOR MPI
-	define_mpi_sparse_array_type(ctx->active_items);
-	define_mpi_context_type(ctx, instance);
-	// <<<<<<<<<< DEFINE CUSTOM DATATYPE FOR MPI
-/*        
-	start = wtime();
-	solve(instance, ctx);
-	printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, wtime() - start);
-*/
-	MPI_Type_free(&mpi_sparse_array_type);
-	MPI_Type_free(&mpi_context_type);
+        printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
+                        wtime() - start);
 
 	MPI_Finalize();
-	exit(EXIT_SUCCESS);
+        exit(EXIT_SUCCESS);
 }
