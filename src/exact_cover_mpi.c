@@ -56,86 +56,12 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
                                 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
                                 'U', 'V', 'W', 'X', 'Y', 'Z'};
 
-// CUSTOM MPI DATATYPE 
-MPI_Datatype ctx_type;
-MPI_Datatype active_item_type;
-MPI_Datatype active_option_type;
-
 enum MSG_TAG
 {
-	NODE,
-	CONTEXT,
-        CONTEXT_AO,
-        ITEM_STATUS,
-        CHUNK_STATUS
+        CHUNK,
+        LEVEL,
+        CHOOSEN_OPTIONS
 };
-
-void create_active_obj_type(struct sparse_array_t* active_obj, struct instance_t * instance, bool item)
-{
-        int nb_obj; 
-	MPI_Datatype types[4] = {MPI_INT, MPI_INT, MPI_INT, MPI_INT};
-	if(item){
-                nb_obj = active_obj->capacity;
-        } else{
-                nb_obj = instance->n_options;
-        }
-        int elementsPerType[4] = {1, 1, nb_obj, nb_obj};
-	MPI_Aint rootAddr;
-	MPI_Get_address(active_obj, &rootAddr);
-	MPI_Aint addr1;
-	MPI_Get_address(&active_obj->len, &addr1);
-	MPI_Aint addr2;
-	MPI_Get_address(&active_obj->capacity, &addr2);
-	MPI_Aint addr3;
-	MPI_Get_address(active_obj->p, &addr3);
-	MPI_Aint addr4;
-	MPI_Get_address(active_obj->q, &addr4);
-	MPI_Aint addresses[4] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr};
-
-        if (item){
-                MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_item_type);
-	        MPI_Type_commit(&active_item_type);
-        } else {
-                MPI_Type_create_struct(4, elementsPerType, addresses, types, &active_option_type);
-	        MPI_Type_commit(&active_option_type);
-        }
-	
-}
-
-void create_ctx_type(struct context_t* ctx, struct instance_t * instance)
-{
-        int n_items = instance->n_items;
-	MPI_Datatype types[7] = {active_item_type, MPI_INT, MPI_INT, MPI_INT, MPI_INT, MPI_LONG_LONG, MPI_LONG_LONG};
-	int elementsPerType[7] = {1, n_items, n_items, n_items, 1, 1, 1};
-
-	MPI_Aint rootAddr;
-	MPI_Get_address(ctx, &rootAddr);
-	MPI_Aint addr1;
-	MPI_Get_address(ctx->active_items, &addr1);
-	MPI_Aint addr2;
-	MPI_Get_address(ctx->chosen_options, &addr2);
-	MPI_Aint addr3;
-	MPI_Get_address(ctx->child_num, &addr3);
-	MPI_Aint addr4;
-	MPI_Get_address(ctx->num_children, &addr4);
-	MPI_Aint addr5;
-	MPI_Get_address(&ctx->level, &addr5);
-	MPI_Aint addr6;
-	MPI_Get_address(&ctx->nodes, &addr6);
-	MPI_Aint addr7;
-	MPI_Get_address(&ctx->solutions, &addr7);
-	MPI_Aint addresses[7] = {addr1 - rootAddr, addr2 - rootAddr, addr3 - rootAddr, addr4 - rootAddr, addr5 - rootAddr, addr6 - rootAddr, addr7 - rootAddr};
-
-	MPI_Type_create_struct(7, elementsPerType, addresses, types, &ctx_type);
-	MPI_Type_commit(&ctx_type);
-}
-
-void free_type()
-{
-	MPI_Type_free(&active_item_type);
-	MPI_Type_free(&ctx_type);
-}
-/* FONCTION MPI DATATYPE*/
 
 double wtime()
 {
@@ -143,7 +69,6 @@ double wtime()
         gettimeofday(&ts, NULL);
         return (double) ts.tv_sec + ts.tv_usec / 1e6;
 }
-
 
 void usage(char **argv)
 {
@@ -172,8 +97,6 @@ void print_option(const struct instance_t *instance, int option)
         }
         printf("\n");
 }
-
-
 
 struct sparse_array_t * sparse_array_init(int n)
 {
@@ -618,16 +541,17 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         // block de communication
         int begin = 0;
         int end = active_options->len;
-        
-        if(proc_rank != 0 && !split){
-                MPI_Recv(&chosen_item, 1, MPI_INT, MPI_ANY_SOURCE, ITEM_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(ctx, 1, ctx_type, MPI_ANY_SOURCE, CONTEXT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                for(int i = 0; i < instance->n_items; i++) {
-                        MPI_Recv(ctx->active_options[i], 1, active_option_type, MPI_ANY_SOURCE, CONTEXT_AO, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                }
-                MPI_Recv(&begin, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&end, 1, MPI_INT, MPI_ANY_SOURCE, CHUNK_STATUS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
+        if(proc_rank != 0 && !split){
+                
+                MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&begin, 1, MPI_INT, 0, CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(&end, 1, MPI_INT, 0, CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                for (int i = 0 ; i < ctx->level; i++){
+                        choose_option(instance, ctx, ctx->chosen_options[i], -1);
+                }
                 split = true;
         }
         if (proc_rank == 0){
@@ -639,14 +563,11 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                         for (int i = 1; i < comm_size; i++){
                                 int local_begin = chunk * i;
                                 int local_end = ( (i + 1) == comm_size ) ? chunk * i + last_chunk : chunk * (i + 1);
-
-                                MPI_Send(&chosen_item, 1, MPI_INT, i, ITEM_STATUS, MPI_COMM_WORLD);
-                                MPI_Send(ctx, 1, ctx_type, i, CONTEXT, MPI_COMM_WORLD);
-                                for(int j = 0; j < instance->n_items; j++) {
-                                        MPI_Send(ctx->active_options[j], 1, active_option_type, i, CONTEXT_AO, MPI_COMM_WORLD);
-                                }
-                                MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
-                                MPI_Send(&local_end, 1, MPI_INT, i, CHUNK_STATUS, MPI_COMM_WORLD);
+                                
+                                MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
+                                MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+                                MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
+                                MPI_Send(&local_end, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
                         }
                         split = true;
                 }
@@ -662,21 +583,13 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                         return;
                 unchoose_option(instance, ctx, option, chosen_item);
         }
-        
+
         // uncover
         if((split && proc_rank==0)){
-                uncover(instance, ctx, chosen_item);                      /* backtrack */
+                uncover(instance, ctx, chosen_item);                      // backtrack
         } else{
-                uncover(instance, ctx, chosen_item);                      /* backtrack */
+                uncover(instance, ctx, chosen_item);                      // backtrack 
         }
-        /*for (int i =0; i < instance->n_items; i++)
-                printf("Active options %d\t", ctx->active_options[i]->len);
-        printf("item %d\n", chosen_item);
-        printf("nodes %lld\n", ctx->nodes);
-        printf("solutions %lld\n", ctx->solutions);
-        for (int i =0; i < instance->n_items; i++)
-                printf("Active items %d\t", ctx->active_items->p[i]);
-        printf("begin  : %d end : %d\n", begin, end);*/      
 }
 
 int main(int argc, char **argv)
@@ -720,18 +633,13 @@ int main(int argc, char **argv)
         struct instance_t * instance = load_matrix(in_filename);
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
-        
-        // CUSTOM DATATYPE FOR MPI
-	create_active_obj_type(ctx->active_items, instance, true);
-	create_active_obj_type(ctx->active_options[0], instance, false);
-        create_ctx_type(ctx, instance);
 	
         solve(instance, ctx);
 
         // wait all threads
         long long solution;
         MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
-        free_type();
+
         if (proc_rank == 0)
                 printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
                         wtime() - start);
