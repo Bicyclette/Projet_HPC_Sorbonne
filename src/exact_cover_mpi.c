@@ -541,45 +541,33 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         // block de communication
         int begin = 0;
         int end = active_options->len;
-        int step;
+        int step = 1;
                 
 
         if(proc_rank != 0 && ctx->level==0){
                 MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&begin, 1, MPI_INT, 0, CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(&end, 1, MPI_INT, 0, CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
                 for (int i = 0 ; i < ctx->level; i++){
                         choose_option(instance, ctx, ctx->chosen_options[i], -1);
                 }
+                begin = proc_rank;
+                step = comm_size;
         }
         if (proc_rank == 0){
                 if(active_options->len >= comm_size && ctx->level == 0){
-                        int chunk = active_options->len/comm_size;
-                        int last_chunk = chunk + (active_options->len % comm_size);
-                        end = chunk;
                         for (int i = 1; i < comm_size; i++){
-                                int local_begin = chunk * i;
-                                int local_end = ( (i + 1) == comm_size ) ? chunk * i + last_chunk : chunk * (i + 1);
                                 MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
                                 MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
-                                MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
-                                MPI_Send(&local_end, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
                         }
+
+                begin = proc_rank;
+                step = comm_size;
+
                 }
         }
-
-        if (ctx->level == 0){
-                begin = proc_rank;
-                end=active_options->len;
-                step = comm_size;
-        }
-        else{
-                step =1;
-        }
         
-        // work
+		// work
         for (int k = begin; k < end; k+=step) {
                 int option = active_options->p[k];
                 ctx->child_num[ctx->level] = k;
