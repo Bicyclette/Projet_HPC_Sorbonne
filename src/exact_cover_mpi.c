@@ -7,10 +7,10 @@
 #include <getopt.h>
 #include <sys/time.h>
 #include <mpi.h>
+#include <omp.h>
 
 int comm_size;
 int proc_rank;
-bool split = false;
 
 double start = 0.0;
 
@@ -541,9 +541,10 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         // block de communication
         int begin = 0;
         int end = active_options->len;
-
-        if(proc_rank != 0 && !split){
+        int step;
                 
+
+        if(proc_rank != 0 && ctx->level==0){
                 MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(&begin, 1, MPI_INT, 0, CHUNK, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -552,29 +553,34 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                 for (int i = 0 ; i < ctx->level; i++){
                         choose_option(instance, ctx, ctx->chosen_options[i], -1);
                 }
-                split = true;
         }
         if (proc_rank == 0){
-                if(active_options->len >= comm_size && !split){
+                if(active_options->len >= comm_size && ctx->level == 0){
                         int chunk = active_options->len/comm_size;
                         int last_chunk = chunk + (active_options->len % comm_size);
                         end = chunk;
-
                         for (int i = 1; i < comm_size; i++){
                                 int local_begin = chunk * i;
                                 int local_end = ( (i + 1) == comm_size ) ? chunk * i + last_chunk : chunk * (i + 1);
-                                
                                 MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
                                 MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
                                 MPI_Send(&local_begin, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
                                 MPI_Send(&local_end, 1, MPI_INT, i, CHUNK, MPI_COMM_WORLD);
                         }
-                        split = true;
                 }
         }
 
+        if (ctx->level == 0){
+                begin = proc_rank;
+                end=active_options->len;
+                step = comm_size;
+        }
+        else{
+                step =1;
+        }
+        
         // work
-        for (int k = begin; k < end; k++) {
+        for (int k = begin; k < end; k+=step) {
                 int option = active_options->p[k];
                 ctx->child_num[ctx->level] = k;
                 choose_option(instance, ctx, option, chosen_item);
@@ -585,16 +591,12 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         }
 
         // uncover
-        if((split && proc_rank==0)){
-                uncover(instance, ctx, chosen_item);                      // backtrack
-        } else{
-                uncover(instance, ctx, chosen_item);                      // backtrack 
-        }
+        uncover(instance, ctx, chosen_item);                      // backtrack 
 }
 
 int main(int argc, char **argv)
 {
-	MPI_Init(&argc, &argv);
+        MPI_Init(&argc, &argv);
 
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
@@ -633,7 +635,7 @@ int main(int argc, char **argv)
         struct instance_t * instance = load_matrix(in_filename);
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
-	
+
         solve(instance, ctx);
 
         // wait all threads
