@@ -108,21 +108,18 @@ void master(struct context_t* ctx)
 		int offset = comm_size - 1;
 
 		for(int i = 0; i < comm_size - 1; ++i)
-			MPI_Irecv(&task_size[i], 1, MPI_INT, MPI_ANY_SOURCE, REQUEST_MACHINES, MPI_COMM_WORLD, &request[i]);
+			MPI_Irecv(&task_size[i], 1, MPI_INT, i+1, REQUEST_MACHINES, MPI_COMM_WORLD, &request[i]);
 		for(int i = 0; i < comm_size - 1; ++i)
-			MPI_Irecv(&task_finished[i], 1, MPI_C_BOOL, MPI_ANY_SOURCE, JOB_FINISHED, MPI_COMM_WORLD, &request[offset + i]);
+			MPI_Irecv(&task_finished[i], 1, MPI_C_BOOL, i+1, JOB_FINISHED, MPI_COMM_WORLD, &request[offset + i]);
 
 		// wait those
 		MPI_Waitsome((comm_size-1) * 2, request, &index_count, index, status);
-		
+
 		// check what we got
 		for(int i = 0; i < index_count; ++i)
 		{
 			// get request index
-			int id = index[i];
-			
-			// get sender rank
-			int sender = status[id].MPI_SOURCE;
+			int id = index[i]; // sender rank
 			
 			if(id < (comm_size - 1)) // slave asked for a pool of machines
 			{
@@ -139,12 +136,12 @@ void master(struct context_t* ctx)
 				}
 			
 				// response
-				//MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, sender, MACHINE_POOL, MPI_COMM_WORLD, &req_response);
+				MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, id, MACHINE_POOL, MPI_COMM_WORLD);
 				available -= machines;
 			}
 			else // slave finished his job
 			{
-				work[sender] = false;
+				work[id - 1] = false;
 				available++;
 			}
 		}
@@ -689,9 +686,8 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 
 		if(active_options->len > 1 && !split)
 		{
-			//MPI_Send(&active_options->len, 1, MPI_INT, 0, REQUEST_MACHINES, MPI_COMM_WORLD);
-			//MPI_Recv(&available_machines, comm_size - 1, MPI_C_BOOL, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			/*
+			MPI_Send(&active_options->len, 1, MPI_INT, 0, REQUEST_MACHINES, MPI_COMM_WORLD);
+			MPI_Recv(&available_machines, comm_size - 1, MPI_C_BOOL, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			bool local_quit = false;
 			int local_begin = 0;
 			int proc;
@@ -711,7 +707,7 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 					MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, proc, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
 					MPI_Send(&split, 1, MPI_C_BOOL, proc, SPLIT, MPI_COMM_WORLD);
 				}
-			}*/
+			}
 			split = false; // for the process who asked for a pool of machines
 		}
 
@@ -794,7 +790,14 @@ int main(int argc, char **argv)
 	if(proc_rank == 0)
 		master(ctx);
 	else
+	{
 		solve(instance, ctx);
+		if(proc_rank == 1)
+		{
+			bool job_finished = true;
+			MPI_Send(&job_finished, 1, MPI_C_BOOL, 0, JOB_FINISHED, MPI_COMM_WORLD);
+		}
+	}
 
 	// wait all threads
 	long long solution;
