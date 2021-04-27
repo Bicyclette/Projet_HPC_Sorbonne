@@ -119,12 +119,17 @@ void master(struct context_t* ctx)
 		for(int i = 0; i < index_count; ++i)
 		{
 			// get request index
-			int id = index[i]; // sender rank
+			int id = index[i];
+
+			// get sender rank
+			int sender = status[i].MPI_SOURCE;
 			
 			if(id < (comm_size - 1)) // slave asked for a pool of machines
 			{
+				printf("demande de machines, sender = %d\n", sender);
 				int num_options = task_size[id];
 				int machines = (available < num_options) ? available : num_options;
+				printf("machines dispos = %d\n", machines);
 				for(int j = 0, k = 0; (j < machines) && (k < comm_size - 1); ++k)
 				{
 					if(!work[k])
@@ -136,12 +141,12 @@ void master(struct context_t* ctx)
 				}
 			
 				// response
-				MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, id, MACHINE_POOL, MPI_COMM_WORLD);
+				MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, sender, MACHINE_POOL, MPI_COMM_WORLD);
 				available -= machines;
 			}
 			else // slave finished his job
 			{
-				work[id - 1] = false;
+				work[sender - 1] = false;
 				available++;
 			}
 		}
@@ -158,7 +163,7 @@ void master(struct context_t* ctx)
 	//for(int i = 0; i < (comm_size - 1); ++i)
 		//MPI_Request_free(&request[i]);
 	free(request);
-	free(index);
+	//free(index);
 }
 
 int get_num_available_machines()
