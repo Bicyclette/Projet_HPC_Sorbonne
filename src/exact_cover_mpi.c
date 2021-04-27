@@ -12,6 +12,10 @@
 int comm_size;
 int proc_rank;
 bool split = false;
+int cpt=0;
+int status;
+bool split_maitre;
+bool split_esclave;
 
 double start = 0.0;
 
@@ -520,6 +524,47 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
         return ctx;
 }
 
+void master(){
+        int cpt=1;
+        int begin;
+        bool send_stop = false;
+        if (active_options->len == 1){
+                int option = active_options->p[0];
+                ctx->child_num[ctx->level] = 0;
+                choose_option(instance, ctx, option, chosen_item);
+                solve(instance, ctx);
+                if (ctx->solutions >= max_solutions)
+                        return;
+                unchoose_option(instance, ctx, option, chosen_item);
+                uncover(instance, ctx, chosen_item);                      // backtrack 
+        } else{
+                split_maitre = true;
+                int solution=0;
+                int num_machines = min(comm_size - 1, active_options->len);
+                int num_recv =0;
+                for (int i = 1; i <= num_machines; i++){
+                        begin = i-1;
+                        MPI_Send(&begin, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
+                        MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
+                        MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+                }
+                while(begin < active_options->len || send_stop){
+                        MPI_Recv(&solution, 1, MPI_INT, MPI_ANY_SOURCE, LEVEL, MPI_COMM_WORLD, &status);
+                        begin = (num_machines*cpt)+(num_recv%num_machines);
+                        num_recv++;
+                        if (num_recv%num_machines==0)
+                                cpt++;
+                        if (begin >= active_options->len){
+                                send_stop = true;
+                                MPI_Send(&stop, 1, MPI_C_BOOL, i, LEVEL, MPI_COMM_WORLD);
+                        } else{
+                                MPI_Ssend(&begin, 1, MPI_INT, status.MPI_SOURCE, LEVEL, MPI_COMM_WORLD);
+                        }
+                        ctx->solutions += solution;
+                }
+        }
+}
+
 void solve(const struct instance_t *instance, struct context_t *ctx)
 {	
 
@@ -539,45 +584,57 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
 
-        // block de communication
-        int begin = 0;
-        int end = active_options->len;
-        int step = 1;
-                
-        if(proc_rank != 0 && !split){
-                MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                split = true;
-                for (int i = 0 ; i < ctx->level; i++){
-                        choose_option(instance, ctx, ctx->chosen_options[i], -1);
-                }
-                begin = proc_rank;
-                step = comm_size;
-        }
-        if (proc_rank == 0 && !split){
-                if(active_options->len >= comm_size){
-                        split = true;
-                        for (int i = 1; i < comm_size; i++){
-                                MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
-                                MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
-                        }
-                        step = comm_size;
-                }
-        }
-        
-	// work
-        for (int k = begin; k < end; k+=step) {
-                int option = active_options->p[k];
-                ctx->child_num[ctx->level] = k;
-                choose_option(instance, ctx, option, chosen_item);
-                solve(instance, ctx);
-                if (ctx->solutions >= max_solutions)
-                        return;
-                unchoose_option(instance, ctx, option, chosen_item);
-        }
 
-        // uncover
-        uncover(instance, ctx, chosen_item);                      // backtrack 
+        if (proc_rank == 0){
+                master();
+        } 
+        else { // esclaves
+
+                        
+                if (first){
+                        MPI_Recv(&cpt, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
+                        MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
+                        MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
+                        for (int i = 0 ; i < ctx->level; i++){
+                                choose_option(instance, ctx, ctx->chosen_options[i], -1);
+                        }
+                        while(!stop){
+                                //recv level + choose option + cpt
+                                // si cpt == avant dernier active option->len => fini 
+                                for (int k = cpt; k < cpt+1; k++) {
+                                        int option = active_options->p[k];
+                                        ctx->child_num[ctx->level] = k;
+                                        choose_option(instance, ctx, option, chosen_item);
+                                        solve(instance, ctx);
+                                        if (ctx->solutions >= max_solutions)
+                                                return;
+                                        unchoose_option(instance, ctx, option, chosen_item);
+                                }
+                                // uncover
+                                uncover(instance, ctx, chosen_item);                      // backtrack 
+                                split_esclave = true;
+                                
+                                MPI_Ssend(&ctx->solutions, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD);
+
+                                MPI_Recv(&cpt, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
+                        }
+                        first = false;
+                } else {
+                        // ou ?? 
+                        for (int k = 0; k < active_options->len; k++) {
+                                int option = active_options->p[k];
+                                ctx->child_num[ctx->level] = k;
+                                choose_option(instance, ctx, option, chosen_item);
+                                solve(instance, ctx);
+                                if (ctx->solutions >= max_solutions)
+                                        return;
+                                unchoose_option(instance, ctx, option, chosen_item);
+                        }
+                        // uncover
+                        uncover(instance, ctx, chosen_item);                      // backtrack 
+                }
+                
+        }
 }
 
 int main(int argc, char **argv)
@@ -622,6 +679,11 @@ int main(int argc, char **argv)
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
 
+        if (proc_rank == 0){
+                split_maitre = false;
+        } else{
+                split_esclave = false;
+        }
         solve(instance, ctx);
 
         // wait all threads
