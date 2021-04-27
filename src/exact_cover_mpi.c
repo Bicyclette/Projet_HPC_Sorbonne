@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <mpi.h>
 #include <omp.h>
+#include <math.h>
 
 int comm_size;
 int proc_rank;
@@ -75,7 +76,7 @@ bool quit = false;
 bool* work; // qui travaille et qui travaille pas, taille = [0:comm_size-1]
 int* task_size; // nombre de branchements à effectuer par machine faisant une demande
 bool* task_finished; // machines ayant fini de travailler
-bool* available_machines; // les variables à true sont les machines dispos pour explorer l'arbre, taille = [0:comm_size-1]
+int available_machines = 0; // un entier, 0 si machine pas dispo, et 1 si dispo
 
 void master(struct context_t* ctx)
 {
@@ -123,27 +124,29 @@ void master(struct context_t* ctx)
 
 			// get sender rank
 			int sender = status[i].MPI_SOURCE;
-			
+
 			if(id < (comm_size - 1)) // slave asked for a pool of machines
 			{
 				int num_options = task_size[id];
 				int machines = (available < num_options) ? available : num_options;
+				available_machines += pow(10,comm_size-1);
 				for(int j = 0, k = 0; (j < machines) && (k < comm_size - 1); ++k)
 				{
 					if(!work[k])
 					{
 						j++;
 						work[k] = true;
-						available_machines[k] = true;
+						available_machines += pow(10,k);
 					}
 				}
 			
 				// response
-				MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, sender, MACHINE_POOL, MPI_COMM_WORLD);
+				MPI_Send(&available_machines, 1, MPI_INT, sender, MACHINE_POOL, MPI_COMM_WORLD);
 				available -= machines;
 			}
 			else // slave finished his job
 			{
+				printf("slave %d has finished\n", sender);
 				work[sender - 1] = false;
 				available++;
 				if(sender == 1)
@@ -151,15 +154,33 @@ void master(struct context_t* ctx)
 					bool local_quit = true;
 					for(int j = 2; j < comm_size; ++j)
 						MPI_Send(&local_quit, 1, MPI_C_BOOL, j, QUIT, MPI_COMM_WORLD);
+					available = comm_size - 1;
 				}
 			}
+			available_machines = 0;
 		}
 
-		// reset task size and available machines
+		// cancel other unsatisfied requests
+		bool cancel = true;
+		for(int i = 0; i < (comm_size - 1) * 2; ++i)
+		{
+			for(int j = 0; j < index_count; ++j)
+			{
+				if(index[j] == i)
+				{
+					cancel = false;
+					break;
+				}
+			}
+			if(cancel)
+				MPI_Cancel(&request[i]);
+			cancel = true;
+		}
+
+		// reset task size
 		for(int i = 0; i < (comm_size - 1); ++i)
 		{
 			task_size[i] = 0;
-			available_machines = false;
 		}
 	}
 
@@ -168,19 +189,6 @@ void master(struct context_t* ctx)
 		//MPI_Request_free(&request[i]);
 	free(request);
 	//free(index);
-}
-
-int get_num_available_machines()
-{
-	int res = 0;
-	for(int i = 0; i < (comm_size - 1); ++i)
-	{
-		if(available_machines[i])
-		{
-			res++;
-		}
-	}
-	return res;
 }
 
 // organisation maître esclave <<<<<<<<<<
@@ -689,6 +697,7 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 			}
 			else
 			{
+				printf("I stop, proc_rank = %d\n", proc_rank);
 				return;
 			}
 		}
@@ -696,16 +705,21 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 		if(active_options->len > 1 && !split)
 		{
 			MPI_Send(&active_options->len, 1, MPI_INT, 0, REQUEST_MACHINES, MPI_COMM_WORLD);
-			printf("avant\n");
-			MPI_Recv(available_machines, comm_size - 1, MPI_C_BOOL, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			printf("après\n");
+			MPI_Recv(&available_machines, 1, MPI_INT, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			if(available_machines != pow(10,comm_size-1))
+			{
+				printf("%d machines sont dispos\n", available_machines);
+			}
+
 			bool local_quit = false;
 			int local_begin = 0;
 			int proc;
 
 			for(int i = 0; i < comm_size - 1; ++i)
 			{
-				if(available_machines[i])
+				int available = available_machines % 10;
+				available_machines /= 10;
+				if(available)
 				{
 					split = true; step++;
 					proc = i + 1;
@@ -719,9 +733,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 					MPI_Send(&split, 1, MPI_C_BOOL, proc, SPLIT, MPI_COMM_WORLD);
 				}
 			}
-			split = false; // for the process who asked for a pool of machines
+			split = false; // for the process who asked for a pool of machines*/
 		}
-
+		
 		// work
 		for(int k = begin; k < end; k+=step)
 		{
@@ -744,7 +758,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 			work[proc_rank - 1] = false;
 		}
 		else
+		{
 			return;
+		}
 	}
 }
 
@@ -792,13 +808,14 @@ int main(int argc, char **argv)
 	struct context_t * ctx = backtracking_setup(instance);
 	start = wtime();
 
-	available_machines = calloc(comm_size - 1, sizeof(bool));
 	task_size = calloc(comm_size - 1, sizeof(int));
 	task_finished = calloc(comm_size - 1, sizeof(bool));
 	work = calloc(comm_size - 1, sizeof(bool));
 
 	if(proc_rank == 0)
+	{
 		master(ctx);
+	}
 	else
 	{
 		solve(instance, ctx);
@@ -817,7 +834,6 @@ int main(int argc, char **argv)
 		printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, wtime() - start);
         
 	MPI_Finalize();
-	free(available_machines);
 	free(task_size);
 	free(task_finished);
 	free(work);
