@@ -126,10 +126,8 @@ void master(struct context_t* ctx)
 			
 			if(id < (comm_size - 1)) // slave asked for a pool of machines
 			{
-				printf("demande de machines, sender = %d\n", sender);
 				int num_options = task_size[id];
 				int machines = (available < num_options) ? available : num_options;
-				printf("machines dispos = %d\n", machines);
 				for(int j = 0, k = 0; (j < machines) && (k < comm_size - 1); ++k)
 				{
 					if(!work[k])
@@ -148,6 +146,12 @@ void master(struct context_t* ctx)
 			{
 				work[sender - 1] = false;
 				available++;
+				if(sender == 1)
+				{
+					bool local_quit = true;
+					for(int j = 2; j < comm_size; ++j)
+						MPI_Send(&local_quit, 1, MPI_C_BOOL, j, QUIT, MPI_COMM_WORLD);
+				}
 			}
 		}
 
@@ -692,7 +696,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 		if(active_options->len > 1 && !split)
 		{
 			MPI_Send(&active_options->len, 1, MPI_INT, 0, REQUEST_MACHINES, MPI_COMM_WORLD);
-			MPI_Recv(&available_machines, comm_size - 1, MPI_C_BOOL, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			printf("avant\n");
+			MPI_Recv(available_machines, comm_size - 1, MPI_C_BOOL, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			printf("après\n");
 			bool local_quit = false;
 			int local_begin = 0;
 			int proc;
@@ -736,7 +742,6 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 			bool job_finished = true;
 			MPI_Send(&job_finished, 1, MPI_C_BOOL, 0, JOB_FINISHED, MPI_COMM_WORLD);
 			work[proc_rank - 1] = false;
-			return;
 		}
 		else
 			return;
