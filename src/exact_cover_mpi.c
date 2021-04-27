@@ -58,10 +58,109 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
 enum MSG_TAG
 {
-        CHUNK,
-        LEVEL,
-        CHOOSEN_OPTIONS
+	REQUEST_MACHINES,
+	JOB_FINISHED,
+	MACHINE_POOL,
+	LEVEL,
+	CHOOSEN_OPTIONS
 };
+
+// organisation maître esclave >>>>>>>>>>
+// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+bool* work; // qui travaille et qui travaille pas, taille = [0:comm_size-1]
+int* task_size; // nombre de branchements à effectuer par machine faisant une demande
+bool* task_finished; // machines ayant fini de travailler
+bool* available_machines; // les variables à true sont les machines dispos pour explorer l'arbre, taille = [0:comm_size-1]
+
+void master()
+{
+	// create array of request and status
+	MPI_Request* request = malloc((comm_size - 1) * 2 * sizeof(MPI_Request));
+	MPI_Status* status = malloc((comm_size - 1) * 2 * sizeof(MPI_Status));
+
+	// output variables for MPI_Waitany
+	int index_count;
+	int* index = calloc((comm_size - 1) * 2, sizeof(int));
+
+	// state of machines
+	int available = (comm_size - 1) - 1; // at the beginning only one machine is working
+
+	while(available != (comm_size - 1)) // as long as some slaves are at work
+	{
+		// bunch of receive
+		int offset = comm_size - 1;
+		for(int i = 0; i < comm_size - 1; ++i)
+			MPI_Irecv(&task_size[i], 1, MPI_INT, MPI_ANY_SOURCE, REQUEST_MACHINES, MPI_COMM_WORLD, &request[i]);
+		for(int i = 0; i < comm_size - 1; ++i)
+			MPI_Irecv(&task_finished[i], 1, MPI_C_BOOL, MPI_ANY_SOURCE, JOB_FINISHED, MPI_COMM_WORLD, &request[offset + i]);
+		
+		// wait those
+		MPI_Waitsome((comm_size-1) * 2, request, &index_count, index, status);
+		
+		// check what we got
+		for(int i = 0; i < index_count; ++i)
+		{
+			// get request index
+			int id = index[i];
+			
+			// get sender rank
+			int sender = status[id].MPI_SOURCE;
+			
+			if(id < (comm_size - 1)) // slave asked for a pool of machines
+			{
+				int num_options = task_size[id];
+				int machines = (available < num_options) ? available : num_options;
+				for(int j = 0; j < machines; ++j)
+				{
+					for(int k = 0; k < comm_size - 1; ++k)
+					{
+						if(!work[k])
+						{
+							work[k] = true;
+							available_machines[k] = true;
+							break;
+						}
+					}
+				}
+				
+				// response
+				MPI_Send(available_machines, comm_size - 1, MPI_C_BOOL, sender, MACHINE_POOL, MPI_COMM_WORLD);
+				available -= machines;
+			}
+			else // slave finished his job
+			{
+				work[sender] = false;
+				available++;
+			}
+		}
+
+		// reset task size and available machines
+		for(int i = 0; i < (comm_size - 1); ++i)
+		{
+			task_size[i] = 0;
+			available_machines = false;
+		}
+	}
+
+	// cleaning
+	for(int i = 0; i < (comm_size - 1); ++i)
+		MPI_Request_free(&request[i]);
+	free(request);
+	free(index);
+}
+
+bool can_assign_work()
+{
+	for(int i = 0; i < comm_size; ++i)
+	{
+		if(!work[i])
+			return true;
+	}
+	return false;
+}
+
+// organisation maître esclave <<<<<<<<<<
+// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 double wtime()
 {
@@ -520,71 +619,75 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
 }
 
 void solve(const struct instance_t *instance, struct context_t *ctx)
-{	
+{
+	ctx->nodes++;
+	if(ctx->nodes == next_report)
+		progress_report(ctx);
+	if(sparse_array_empty(ctx->active_items))
+	{
+		solution_found(instance, ctx);
+		return;                         /* succès : plus d'objet actif */
+	}
+	int chosen_item = choose_next_item(ctx);
 
-        ctx->nodes++;
-        if (ctx->nodes == next_report)
-                progress_report(ctx);
-        if (sparse_array_empty(ctx->active_items)) {
-                solution_found(instance, ctx);
-                return;                         /* succès : plus d'objet actif */
-        }
-        int chosen_item = choose_next_item(ctx);
-        
-        struct sparse_array_t *active_options = ctx->active_options[chosen_item];
-        if (sparse_array_empty(active_options)){
-                return;           /* échec : impossible de couvrir chosen_item */
-        }
-        cover(instance, ctx, chosen_item);
-        ctx->num_children[ctx->level] = active_options->len;
+	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+	if (sparse_array_empty(active_options))
+	{
+		return;           /* échec : impossible de couvrir chosen_item */
+	}
+	cover(instance, ctx, chosen_item);
+	ctx->num_children[ctx->level] = active_options->len;
 
-        // block de communication
-        int begin = 0;
-        int end = active_options->len;
-        int step = 1;
-                
+	// block de communication
+	int begin = 0;
+	int end = active_options->len;
+	int step = 1;            
 
-        if(proc_rank != 0 && ctx->level==0){
-                MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	while(!work[proc_rank])
+	{
+		MPI_Recv(&ctx->level, 1, MPI_INT, MPI_ANY_SOURCE, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+		MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, MPI_ANY_SOURCE, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                for (int i = 0 ; i < ctx->level; i++){
-                        choose_option(instance, ctx, ctx->chosen_options[i], -1);
-                }
-                begin = proc_rank;
-                step = comm_size;
-        }
-        if (proc_rank == 0){
-                if(active_options->len >= comm_size && ctx->level == 0){
-                        for (int i = 1; i < comm_size; i++){
-                                MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
-                                MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
-                        }
+		for(int i = 0 ; i < ctx->level; i++)
+		{
+			choose_option(instance, ctx, ctx->chosen_options[i], -1);
+		}
+		begin = proc_rank;
+		step = comm_size;
+		work[proc_rank] = true;
+	}
 
-                begin = proc_rank;
-                step = comm_size;
+	if(proc_rank == 0 && active_options->len >= comm_size && can_assign_work())
+	{
+		for(int i = 1; i < comm_size; ++i)
+		{
+			work[i] = true;
+			MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
+			MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+		}
+		begin = proc_rank;
+		step = comm_size;
+	}
 
-                }
-        }
-        
-		// work
-        for (int k = begin; k < end; k+=step) {
-                int option = active_options->p[k];
-                ctx->child_num[ctx->level] = k;
-                choose_option(instance, ctx, option, chosen_item);
-                solve(instance, ctx);
-                if (ctx->solutions >= max_solutions)
-                        return;
-                unchoose_option(instance, ctx, option, chosen_item);
-        }
+	// work
+	for(int k = begin; k < end; k+=step)
+	{
+		int option = active_options->p[k];
+		ctx->child_num[ctx->level] = k;
+		choose_option(instance, ctx, option, chosen_item);
+		solve(instance, ctx);
+		if (ctx->solutions >= max_solutions)
+			return;
+		unchoose_option(instance, ctx, option, chosen_item);
+	}
 
-        // uncover
-        uncover(instance, ctx, chosen_item);                      // backtrack 
+	// uncover
+	uncover(instance, ctx, chosen_item);                      // backtrack 
 }
 
 int main(int argc, char **argv)
 {
-        MPI_Init(&argc, &argv);
+	MPI_Init(&argc, &argv);
 
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
@@ -596,44 +699,58 @@ int main(int argc, char **argv)
                 {"stop-after", required_argument, NULL, 's'},
                 {NULL, 0, NULL, 0}
         };
-        char ch;
-        while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
-                switch (ch) {
-                case 'i':
-                        in_filename = optarg;
-                        break;
-                case 'p':
-                        print_solutions = true;
-                        break;
-                case 's':
-                        max_solutions = atoll(optarg);
-                        break;
-                case 'v':
-                        report_delta = atoll(optarg);
-                        break;          
-                default:
-                        errx(1, "Unknown option\n");
-                }
-        }
-        if (in_filename == NULL)
-                usage(argv);
-        next_report = report_delta;
+	char ch;
+	while((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1)
+	{
+		switch(ch)
+		{
+			case 'i':
+				in_filename = optarg;
+				break;
+			case 'p':
+				print_solutions = true;
+				break;
+			case 's':
+				max_solutions = atoll(optarg);
+				break;
+			case 'v':
+				report_delta = atoll(optarg);
+				break;
+			default:
+				errx(1, "Unknown option\n");
+		}
+	}
+	if (in_filename == NULL)
+		usage(argv);
+	next_report = report_delta;
 
 
-        struct instance_t * instance = load_matrix(in_filename);
-        struct context_t * ctx = backtracking_setup(instance);
-        start = wtime();
+	struct instance_t * instance = load_matrix(in_filename);
+	struct context_t * ctx = backtracking_setup(instance);
+	start = wtime();
 
-        solve(instance, ctx);
+	available_machines = calloc(comm_size - 1, sizeof(bool));
+	task_size = calloc(comm_size - 1, sizeof(int));
+	task_finished = calloc(comm_size - 1, sizeof(bool));
+	work = calloc(comm_size - 1, sizeof(bool));
+	work[0] = true;
+/*
+	if(proc_rank == 0)
+		master();
+	else*/
+		solve(instance, ctx);
 
-        // wait all threads
-        long long solution;
-        MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
+	// wait all threads
+	long long solution;
+	MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
-        if (proc_rank == 0)
-                printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
-                        wtime() - start);
+	if (proc_rank == 0)
+		printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, wtime() - start);
         
 	MPI_Finalize();
-        exit(EXIT_SUCCESS);
+	free(available_machines);
+	free(task_size);
+	free(task_finished);
+	free(work);
+	exit(EXIT_SUCCESS);
 }
