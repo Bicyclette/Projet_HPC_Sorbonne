@@ -7,7 +7,7 @@ endif
 
 # DEFINE COMPILE FLAGS ==========
 # ===============================
-CFLAGS = -Wall -Wextra -Wall -lm
+CFLAGS = -Wall -Wextra -Wall
 ifdef debug
 	CFLAGS += -g
 else

@@ -8,7 +8,6 @@
 #include <sys/time.h>
 #include <mpi.h>
 #include <omp.h>
-#include <math.h>
 
 int comm_size;
 int proc_rank;
@@ -59,140 +58,10 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
 
 enum MSG_TAG
 {
-	QUIT,
-	BEGIN,
-	STEP,
-	REQUEST_MACHINES,
-	JOB_FINISHED,
-	MACHINE_POOL,
-	LEVEL,
-	CHOOSEN_OPTIONS,
-	SPLIT
+        CHUNK,
+        LEVEL,
+        CHOOSEN_OPTIONS
 };
-
-// organisation maître esclave >>>>>>>>>>
-// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-bool quit = false;
-bool* work; // qui travaille et qui travaille pas, taille = [0:comm_size-1]
-int* task_size; // nombre de branchements à effectuer par machine faisant une demande
-bool* task_finished; // machines ayant fini de travailler
-int available_machines = 0; // un entier, 0 si machine pas dispo, et 1 si dispo
-
-void master(struct context_t* ctx)
-{
-	// create array of request and status
-	MPI_Request* request = malloc((comm_size - 1) * 2 * sizeof(MPI_Request));
-	MPI_Status* status = malloc((comm_size - 1) * 2 * sizeof(MPI_Status));
-
-	// output variables for MPI_Waitsome
-	int index_count;
-	int* index = calloc((comm_size - 1) * 2, sizeof(int));
-
-	// state of machines
-	int available = (comm_size - 1) - 1; // at the beginning only one machine is working
-
-	// launch first machine
-	int begin = 0;
-	int step = 1;
-	bool split = false;
-	MPI_Send(&quit, 1, MPI_C_BOOL, 1, QUIT, MPI_COMM_WORLD);
-	MPI_Send(&begin, 1, MPI_INT, 1, BEGIN, MPI_COMM_WORLD);
-	MPI_Send(&step, 1, MPI_INT, 1, STEP, MPI_COMM_WORLD);
-	MPI_Send(&ctx->level, 1, MPI_INT, 1, LEVEL, MPI_COMM_WORLD);
-	MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, 1, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
-	MPI_Send(&split, 1, MPI_C_BOOL, 1, SPLIT, MPI_COMM_WORLD);
-	work[0] = true;
-
-	while(available != (comm_size - 1)) // as long as some slaves are working
-	{
-		// bunch of receive
-		int offset = comm_size - 1;
-
-		for(int i = 0; i < comm_size - 1; ++i)
-			MPI_Irecv(&task_size[i], 1, MPI_INT, i+1, REQUEST_MACHINES, MPI_COMM_WORLD, &request[i]);
-		for(int i = 0; i < comm_size - 1; ++i)
-			MPI_Irecv(&task_finished[i], 1, MPI_C_BOOL, i+1, JOB_FINISHED, MPI_COMM_WORLD, &request[offset + i]);
-
-		// wait those
-		MPI_Waitsome((comm_size-1) * 2, request, &index_count, index, status);
-
-		// check what we got
-		for(int i = 0; i < index_count; ++i)
-		{
-			// get request index
-			int id = index[i];
-
-			// get sender rank
-			int sender = status[i].MPI_SOURCE;
-
-			if(id < (comm_size - 1)) // slave asked for a pool of machines
-			{
-				int num_options = task_size[id];
-				int machines = (available < num_options) ? available : num_options;
-				available_machines += pow(10,comm_size-1);
-				for(int j = 0, k = 0; (j < machines) && (k < comm_size - 1); ++k)
-				{
-					if(!work[k])
-					{
-						j++;
-						work[k] = true;
-						available_machines += pow(10,k);
-					}
-				}
-			
-				// response
-				MPI_Send(&available_machines, 1, MPI_INT, sender, MACHINE_POOL, MPI_COMM_WORLD);
-				available -= machines;
-			}
-			else // slave finished his job
-			{
-				printf("slave %d has finished\n", sender);
-				work[sender - 1] = false;
-				available++;
-				if(sender == 1)
-				{
-					bool local_quit = true;
-					for(int j = 2; j < comm_size; ++j)
-						MPI_Send(&local_quit, 1, MPI_C_BOOL, j, QUIT, MPI_COMM_WORLD);
-					available = comm_size - 1;
-				}
-			}
-			available_machines = 0;
-		}
-
-		// cancel other unsatisfied requests
-		bool cancel = true;
-		for(int i = 0; i < (comm_size - 1) * 2; ++i)
-		{
-			for(int j = 0; j < index_count; ++j)
-			{
-				if(index[j] == i)
-				{
-					cancel = false;
-					break;
-				}
-			}
-			if(cancel)
-				MPI_Cancel(&request[i]);
-			cancel = true;
-		}
-
-		// reset task size
-		for(int i = 0; i < (comm_size - 1); ++i)
-		{
-			task_size[i] = 0;
-		}
-	}
-
-	// cleaning
-	//for(int i = 0; i < (comm_size - 1); ++i)
-		//MPI_Request_free(&request[i]);
-	free(request);
-	//free(index);
-}
-
-// organisation maître esclave <<<<<<<<<<
-// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 double wtime()
 {
@@ -651,130 +520,71 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
 }
 
 void solve(const struct instance_t *instance, struct context_t *ctx)
-{
-	ctx->nodes++;
-	if(ctx->nodes == next_report)
-		progress_report(ctx);
-	if(sparse_array_empty(ctx->active_items))
-	{
-		solution_found(instance, ctx);
-		return;                         /* succès : plus d'objet actif */
-	}
-	int chosen_item = choose_next_item(ctx);
+{	
 
-	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
-	if (sparse_array_empty(active_options))
-	{
-		return;           /* échec : impossible de couvrir chosen_item */
-	}
-	cover(instance, ctx, chosen_item);
-	ctx->num_children[ctx->level] = active_options->len;
+        ctx->nodes++;
+        if (ctx->nodes == next_report)
+                progress_report(ctx);
+        if (sparse_array_empty(ctx->active_items)) {
+                solution_found(instance, ctx);
+                return;                         /* succès : plus d'objet actif */
+        }
+        int chosen_item = choose_next_item(ctx);
+        
+        struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+        if (sparse_array_empty(active_options)){
+                return;           /* échec : impossible de couvrir chosen_item */
+        }
+        cover(instance, ctx, chosen_item);
+        ctx->num_children[ctx->level] = active_options->len;
 
-	// block de communication
-	int begin = 0;
-	int end = active_options->len;
-	int step = 1;
-	bool split = false;
+        // block de communication
+        int begin = 0;
+        int end = active_options->len;
+        int step = 1;
+                
 
-	while(true)
-	{
-		if(!work[proc_rank - 1])
-		{
-			printf("slave %d is now waiting for work\n", proc_rank);
-			MPI_Recv(&quit, 1, MPI_C_BOOL, MPI_ANY_SOURCE, QUIT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			if(!quit)
-			{
-				printf("%d pass1\n", proc_rank);
-				MPI_Recv(&begin, 1, MPI_INT, MPI_ANY_SOURCE, BEGIN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("%d pass2\n", proc_rank);
-				MPI_Recv(&step, 1, MPI_INT, MPI_ANY_SOURCE, STEP, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("%d pass3\n", proc_rank);
-				MPI_Recv(&ctx->level, 1, MPI_INT, MPI_ANY_SOURCE, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("%d pass4\n", proc_rank);
-				MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, MPI_ANY_SOURCE, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("%d pass5\n", proc_rank);
-				MPI_Recv(&split, 1, MPI_C_BOOL, MPI_ANY_SOURCE, SPLIT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-				printf("%d pass6\n", proc_rank);
+        if(proc_rank != 0 && ctx->level==0){
+                MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-				for(int i = 0 ; i < ctx->level; i++)
-				{
-					choose_option(instance, ctx, ctx->chosen_options[i], -1);
-				}
-				work[proc_rank - 1] = true;
-				printf("slave %d all data received for work\n", proc_rank);
-			}
-			else
-			{
-				printf("I stop, proc_rank = %d\n", proc_rank);
-				return;
-			}
-		}
+                for (int i = 0 ; i < ctx->level; i++){
+                        choose_option(instance, ctx, ctx->chosen_options[i], -1);
+                }
+                begin = proc_rank;
+                step = comm_size;
+        }
+        if (proc_rank == 0){
+                if(active_options->len >= comm_size && ctx->level == 0){
+                        for (int i = 1; i < comm_size; i++){
+                                MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
+                                MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+                        }
 
-		if(active_options->len > 1 && !split)
-		{
-			MPI_Send(&active_options->len, 1, MPI_INT, 0, REQUEST_MACHINES, MPI_COMM_WORLD);
-			MPI_Recv(&available_machines, 1, MPI_INT, 0, MACHINE_POOL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			if(available_machines != pow(10,comm_size-1))
-			{
-				printf("%d machines sont dispos\n", available_machines);
-			}
+                begin = proc_rank;
+                step = comm_size;
 
-			bool local_quit = false;
-			int local_begin = 0;
-			int proc;
-
-			for(int i = 0; i < comm_size - 1; ++i)
-			{
-				int available = available_machines % 10;
-				available_machines /= 10;
-				if(available)
-				{
-					split = true; step++;
-					proc = i + 1;
-					printf("proc = %d\n", proc);
-					local_begin++;
-					MPI_Send(&local_quit, 1, MPI_C_BOOL, proc, QUIT, MPI_COMM_WORLD);
-					MPI_Send(&local_begin, 1, MPI_INT, proc, BEGIN, MPI_COMM_WORLD);
-					MPI_Send(&step, 1, MPI_INT, proc, STEP, MPI_COMM_WORLD);
-					MPI_Send(&ctx->level, 1, MPI_INT, proc, LEVEL, MPI_COMM_WORLD);
-					MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, proc, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
-					MPI_Send(&split, 1, MPI_C_BOOL, proc, SPLIT, MPI_COMM_WORLD);
-				}
-			}
-			split = false; // for the process who asked for a pool of machines*/
-		}
-		
+                }
+        }
+        
 		// work
-		for(int k = begin; k < end; k+=step)
-		{
-			int option = active_options->p[k];
-			ctx->child_num[ctx->level] = k;
-			choose_option(instance, ctx, option, chosen_item);
-			solve(instance, ctx);
-			if (ctx->solutions >= max_solutions)
-				return;
-			unchoose_option(instance, ctx, option, chosen_item);
-		}
+        for (int k = begin; k < end; k+=step) {
+                int option = active_options->p[k];
+                ctx->child_num[ctx->level] = k;
+                choose_option(instance, ctx, option, chosen_item);
+                solve(instance, ctx);
+                if (ctx->solutions >= max_solutions)
+                        return;
+                unchoose_option(instance, ctx, option, chosen_item);
+        }
 
-		// uncover
-		uncover(instance, ctx, chosen_item);                      // backtrack
-
-		if(split)
-		{
-			bool job_finished = true;
-			MPI_Send(&job_finished, 1, MPI_C_BOOL, 0, JOB_FINISHED, MPI_COMM_WORLD);
-			work[proc_rank - 1] = false;
-		}
-		else
-		{
-			return;
-		}
-	}
+        // uncover
+        uncover(instance, ctx, chosen_item);                      // backtrack 
 }
 
 int main(int argc, char **argv)
 {
-	MPI_Init(&argc, &argv);
+        MPI_Init(&argc, &argv);
 
 	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
 	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
@@ -786,64 +596,44 @@ int main(int argc, char **argv)
                 {"stop-after", required_argument, NULL, 's'},
                 {NULL, 0, NULL, 0}
         };
-	char ch;
-	while((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1)
-	{
-		switch(ch)
-		{
-			case 'i':
-				in_filename = optarg;
-				break;
-			case 'p':
-				print_solutions = true;
-				break;
-			case 's':
-				max_solutions = atoll(optarg);
-				break;
-			case 'v':
-				report_delta = atoll(optarg);
-				break;
-			default:
-				errx(1, "Unknown option\n");
-		}
-	}
-	if (in_filename == NULL)
-		usage(argv);
-	next_report = report_delta;
+        char ch;
+        while ((ch = getopt_long(argc, argv, "", longopts, NULL)) != -1) {
+                switch (ch) {
+                case 'i':
+                        in_filename = optarg;
+                        break;
+                case 'p':
+                        print_solutions = true;
+                        break;
+                case 's':
+                        max_solutions = atoll(optarg);
+                        break;
+                case 'v':
+                        report_delta = atoll(optarg);
+                        break;          
+                default:
+                        errx(1, "Unknown option\n");
+                }
+        }
+        if (in_filename == NULL)
+                usage(argv);
+        next_report = report_delta;
 
 
-	struct instance_t * instance = load_matrix(in_filename);
-	struct context_t * ctx = backtracking_setup(instance);
-	start = wtime();
+        struct instance_t * instance = load_matrix(in_filename);
+        struct context_t * ctx = backtracking_setup(instance);
+        start = wtime();
 
-	task_size = calloc(comm_size - 1, sizeof(int));
-	task_finished = calloc(comm_size - 1, sizeof(bool));
-	work = calloc(comm_size - 1, sizeof(bool));
+        solve(instance, ctx);
 
-	if(proc_rank == 0)
-	{
-		master(ctx);
-	}
-	else
-	{
-		solve(instance, ctx);
-		if(proc_rank == 1)
-		{
-			bool job_finished = true;
-			MPI_Send(&job_finished, 1, MPI_C_BOOL, 0, JOB_FINISHED, MPI_COMM_WORLD);
-		}
-	}
+        // wait all threads
+        long long solution;
+        MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
 
-	// wait all threads
-	long long solution;
-	MPI_Reduce(&ctx->solutions, &solution, 1, MPI_LONG_LONG, MPI_SUM, 0, MPI_COMM_WORLD);
-
-	if (proc_rank == 0)
-		printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, wtime() - start);
+        if (proc_rank == 0)
+                printf("FINI. Trouvé %lld solutions en %.1fs\n", solution, 
+                        wtime() - start);
         
 	MPI_Finalize();
-	free(task_size);
-	free(task_finished);
-	free(work);
-	exit(EXIT_SUCCESS);
+        exit(EXIT_SUCCESS);
 }
