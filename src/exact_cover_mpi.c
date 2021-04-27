@@ -680,20 +680,28 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 	{
 		if(!work[proc_rank - 1])
 		{
+			printf("slave %d is now waiting for work\n", proc_rank);
 			MPI_Recv(&quit, 1, MPI_C_BOOL, MPI_ANY_SOURCE, QUIT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			if(!quit)
 			{
+				printf("%d pass1\n", proc_rank);
 				MPI_Recv(&begin, 1, MPI_INT, MPI_ANY_SOURCE, BEGIN, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("%d pass2\n", proc_rank);
 				MPI_Recv(&step, 1, MPI_INT, MPI_ANY_SOURCE, STEP, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("%d pass3\n", proc_rank);
 				MPI_Recv(&ctx->level, 1, MPI_INT, MPI_ANY_SOURCE, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("%d pass4\n", proc_rank);
 				MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, MPI_ANY_SOURCE, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("%d pass5\n", proc_rank);
 				MPI_Recv(&split, 1, MPI_C_BOOL, MPI_ANY_SOURCE, SPLIT, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				printf("%d pass6\n", proc_rank);
 
 				for(int i = 0 ; i < ctx->level; i++)
 				{
 					choose_option(instance, ctx, ctx->chosen_options[i], -1);
 				}
 				work[proc_rank - 1] = true;
+				printf("slave %d all data received for work\n", proc_rank);
 			}
 			else
 			{
