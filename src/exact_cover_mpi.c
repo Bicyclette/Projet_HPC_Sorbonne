@@ -11,6 +11,7 @@
 
 int comm_size;
 int proc_rank;
+bool split = false;
 
 double start = 0.0;
 
@@ -543,31 +544,28 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         int end = active_options->len;
         int step = 1;
                 
-
-        if(proc_rank != 0 && ctx->level==0){
+        if(proc_rank != 0 && !split){
                 MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                 MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
+                split = true;
                 for (int i = 0 ; i < ctx->level; i++){
                         choose_option(instance, ctx, ctx->chosen_options[i], -1);
                 }
                 begin = proc_rank;
                 step = comm_size;
         }
-        if (proc_rank == 0){
-                if(active_options->len >= comm_size && ctx->level == 0){
+        if (proc_rank == 0 && !split){
+                if(active_options->len >= comm_size){
+                        split = true;
                         for (int i = 1; i < comm_size; i++){
                                 MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
                                 MPI_Send(ctx->chosen_options, ctx->level, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
                         }
-
-                begin = proc_rank;
-                step = comm_size;
-
+                        step = comm_size;
                 }
         }
         
-		// work
+	// work
         for (int k = begin; k < end; k+=step) {
                 int option = active_options->p[k];
                 ctx->child_num[ctx->level] = k;
