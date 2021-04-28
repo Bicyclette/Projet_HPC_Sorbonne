@@ -643,13 +643,37 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
 			if(root)
 			{
 				root = false;
-				MPI_Recv(&ctx->level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
-				MPI_Recv(ctx->chosen_options, ctx->level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
-				for(int i = 0 ; i < ctx->level; i++)
+				int local_level;
+				MPI_Recv(&local_level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
+				MPI_Recv(ctx->chosen_options, local_level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
+
+				ctx->nodes = 0;
+				uncover(instance, ctx, chosen_item); // backtrack
+				
+				for(int i = 0 ; i < local_level; ++i)
 				{
 					choose_option(instance, ctx, ctx->chosen_options[i], -1);
 				}
+				
+				ctx->nodes++;
+				if(ctx->nodes == next_report)
+					progress_report(ctx);
+				if(sparse_array_empty(ctx->active_items))
+				{
+					solution_found(instance, ctx);
+					return;                         /* succès : plus d'objet actif */
+				}
+				chosen_item = choose_next_item(ctx);
+
+				active_options = ctx->active_options[chosen_item];
+				if(sparse_array_empty(active_options))
+				{
+					return;           /* échec : impossible de couvrir chosen_item */
+				}
+				cover(instance, ctx, chosen_item);
+				ctx->num_children[ctx->level] = active_options->len;
 			}
+			
 			// portion unitaire au niveau du split chez les esclaves
 			int option = active_options->p[begin];
 			ctx->child_num[ctx->level] = begin;
