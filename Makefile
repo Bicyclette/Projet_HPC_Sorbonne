@@ -1,3 +1,5 @@
+PROGRAM = exact_cover_seq
+
 # DEFINE COMPILER ==========
 # ==========================
 CC = gcc
@@ -33,13 +35,23 @@ else
 	endif
 endif
 
+# PROGRAM NAME ==========
+# =======================
+ifdef mpi
+	PROGRAM = exact_cover_mpi
+else
+	ifdef omp
+		PROGRAM = exact_cover_omp
+	else
+		ifdef final
+			PROGRAM = exact_cover_para
+		endif
+	endif
+endif
+
 # TARGETS ==========
 # ==================
-
-PROGRAM = exact_cover
 
 $(PROGRAM): $(SRC)
 	$(CC) -o $@ $^ $(CFLAGS)
 
-clean:
-	rm $(PROGRAM)
