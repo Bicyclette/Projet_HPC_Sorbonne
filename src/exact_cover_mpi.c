@@ -747,7 +747,43 @@ int main(int argc, char **argv)
 		usage(argv);
 	next_report = report_delta;
 
-	struct instance_t * instance = load_matrix(in_filename);
+	struct instance_t * instance;
+	if(proc_rank == 0)
+	{
+		instance = load_matrix(in_filename);
+		int n_it = instance->n_items;
+		int n_op = instance->n_options;
+
+		// send instance to slaves
+		MPI_Bcast(&instance->n_items, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&instance->n_primary, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&instance->n_options, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(instance->options, n_op * n_it, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(instance->ptr, n_op + 1, MPI_INT, 0, MPI_COMM_WORLD);
+	}
+	else
+	{
+		instance = malloc(sizeof(*instance));
+		if(instance == NULL)
+			err(1, "Impossible d'allouer l'instance");
+		else
+		{
+			// receive instance from master
+			MPI_Bcast(&instance->n_items, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(&instance->n_primary, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(&instance->n_options, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+			int n_it = instance->n_items;
+			int n_op = instance->n_options;
+			instance->ptr = malloc((n_op + 1) * sizeof(int));
+			instance->options = malloc(n_it * n_op *sizeof(int));         // surallocation massive
+			instance->item_name = NULL;
+
+			MPI_Bcast(instance->options, n_op * n_it, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(instance->ptr, n_op + 1, MPI_INT, 0, MPI_COMM_WORLD);
+		}
+	}
+
 	struct context_t * ctx = backtracking_setup(instance);
 	start = wtime();
 	solve(instance, ctx);
