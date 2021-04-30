@@ -32,7 +32,7 @@ list_instances = [
 def start_program(iter_min, iter_max, step, instance_file):
     next = 1
     for i in range(iter_min, iter_max + 1, step):
-        cmd = "mpirun -np " + str(i) + " ./exact_cover_mpi --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
+        cmd = "mpirun -np " + str(i) + " -machinefile $OAR_NODEFILE ./exact_cover_mpi --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
         os.system(cmd)
         while(len(open('graphs/data.txt').readlines()) < next):
             time.sleep(0.01)
