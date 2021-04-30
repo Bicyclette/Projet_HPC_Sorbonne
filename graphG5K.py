@@ -110,7 +110,7 @@ os.system(cmd)
 
 iter_min = 3
 iter_max = int(num_machines)
-step = 2
+step = 4
 
 for i in range(len(list_instances)):
     print("Start: {}".format(list_instances[i]))
