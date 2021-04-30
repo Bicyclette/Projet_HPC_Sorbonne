@@ -92,7 +92,6 @@ def launch_graph(i, n):
     if i == len(list_instances) - 1:
         iterations = 1
     for i in range(iterations):
-        print("instance : " + instance_file + ", mesure numéro " + str(i) + '\n')
         nb_lines = start_program(iter_min, iter_max, step, instance_file)
         # remplir le dico
         d = fill_dico(fichier, nb_lines)
