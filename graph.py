@@ -129,9 +129,9 @@ cmd = "make mpi=1"
 #cmd = "make para=1"
 os.system(cmd)
 
-iter_min = 3
+iter_min = 2
 iter_max = int(num_machines)
-step = 2
+step = 1
 
 for i in range(len(list_instances)):
     print("Start: {}".format(list_instances[i]))
