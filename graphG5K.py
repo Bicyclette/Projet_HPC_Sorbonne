@@ -9,6 +9,10 @@ import numpy as np
 import math
 import operator
 from collections import Counter
+import json
+
+# file in which we save graph data
+graphs = open("graphs/graphs.txt", "w")
 
 # instances
 list_instances = [
@@ -44,31 +48,6 @@ def fill_dico(fichier, nb_lines):
         dico[i] = float(elems[5].split('s')[0])
     return dico
 
-def draw_fig(dico, file, n, t_seq):
-    title = "Temps d'execution en fonction du nombre de processeurs\n Instance : {}\n Cluster Grid'5000: Paravance à Rennes\n".format(file)
-    fig, ax = plt.subplots(figsize=(10,10))
-    plt.title(title)
-    dico_list = sorted(dico.items())
-    x = []
-    y = []
-    for k,v in dico.items():
-        x.append(k)
-        y.append(round(v, 3))
-        plt.scatter(int(k), float(v), c="blue")
-    plt.grid(True, "both")
-    plt.minorticks_on()
-
-    for cx, cy in zip(x, y):
-        plt.text(cx, cy, '({}, {})'.format(cx, cy))
-    plt.plot(x,y)
-    
-    plt.xlabel('Nombre de travailleurs')
-    plt.ylabel('Temps d\'execution (s)')
-    plt.xticks(range(1, int(n)))
-    plt.axhline(t_seq, c="red", label = "Temps séquentiel = {}s".format(round(t_seq, 3)))
-    plt.legend(fontsize=20)
-    plt.savefig("graphs/mpi/{}".format(file.split(".")[0]))
-
 def launch_graph(i, n):
     # on récupère le temps séquentiel
     instance_file = list_instances[i]
@@ -101,8 +80,8 @@ def launch_graph(i, n):
     total = sum(map(Counter, dicos), Counter())
     dico = {k : v/10 for k,v in total.items()}
 
-    # affichage
-    draw_fig(dico, instance_file, n, t_seq)
+    # write
+    graphs.write(str(t_seq) + " " + json.dumps(dico) + " " + instance_file + '\n')
 
     fichier.truncate(0)
     fichier.close()
