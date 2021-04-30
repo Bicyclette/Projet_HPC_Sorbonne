@@ -113,7 +113,7 @@ argLength = len(sys.argv)
 num_machines = 0
 if argLength == 2:
     num_machines = sys.argv[1]
-    if(num_machines <= 2):
+    if(int(num_machines) <= 2):
         print("Erreur, il faut indiquer un nombre de travailleurs >= 3\n")
         quit()
 else:
