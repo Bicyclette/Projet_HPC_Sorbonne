@@ -580,7 +580,7 @@ int main(int argc, char **argv)
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
         solve(instance, ctx);
-        printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
+        printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, 
                         wtime() - start);
         exit(EXIT_SUCCESS);
 }

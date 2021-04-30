@@ -30,7 +30,7 @@ list_instances = [
 def start_program(iter_min, iter_max, step, instance_file):
     next = 1
     for i in range(iter_min, iter_max + 1, step):
-        cmd = "mpirun -np " + str(i) + " -machinefile $OAR_NODEFILE ./exact_cover_mpi --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
+        cmd = "mpirun -np " + str(i) + " --mca btl_base_warn_component_unused 0 -machinefile $OAR_NODEFILE ./exact_cover_mpi --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
         os.system(cmd)
         print(cmd)
         while(len(open('graphs/data.txt').readlines()) < next):
@@ -83,6 +83,7 @@ def launch_graph(i, n):
 
     # write
     graphs.write(str(t_seq) + " " + json.dumps(dico) + " " + instance_file + '\n')
+    print(graphs)
 
     fichier.truncate(0)
     fichier.close()

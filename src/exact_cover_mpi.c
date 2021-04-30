@@ -586,6 +586,9 @@ void master(int num_options, struct context_t* ctx)
 			MPI_Send(&begin, 1, MPI_INT, status.MPI_SOURCE, STOP_BEGIN, MPI_COMM_WORLD);
 		}
 	}
+
+	for(int i = 1; i < comm_size; ++i)
+		MPI_Send(&stop, 1, MPI_INT, i, STOP_BEGIN, MPI_COMM_WORLD);
 }
 
 void solve(const struct instance_t *instance, struct context_t *ctx)
@@ -789,7 +792,7 @@ int main(int argc, char **argv)
 	solve(instance, ctx);
 	if(proc_rank == 0)
 	{
-		printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, wtime() - start);
+		printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, wtime() - start);
 	}
 
 	MPI_Finalize();
