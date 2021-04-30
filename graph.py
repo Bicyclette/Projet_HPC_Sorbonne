@@ -63,7 +63,6 @@ def draw_fig(dico, file, n, t_seq):
     
     plt.xlabel('Nombre de travailleurs')
     plt.ylabel('Temps d\'execution (s)')
-    plt.xticks(range(1, int(n)))
     plt.axhline(t_seq, c="red", label = "Temps séquentiel = {}s".format(round(t_seq, 3)))
     plt.legend(fontsize=20)
     plt.savefig("graphs/mpi/{}".format(file.split(".")[0]))
