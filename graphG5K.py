@@ -32,6 +32,7 @@ def start_program(iter_min, iter_max, step, instance_file):
     for i in range(iter_min, iter_max + 1, step):
         cmd = "mpirun -np " + str(i) + " -machinefile $OAR_NODEFILE ./exact_cover_mpi --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
         os.system(cmd)
+        print(cmd)
         while(len(open('graphs/data.txt').readlines()) < next):
             time.sleep(0.01)
         next+=1
@@ -52,7 +53,7 @@ def launch_graph(i, n):
     fichier = open("graphs/data.txt", "r+")
     fichier.truncate(0)
     cmd = "./exact_cover_seq --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
-    print("Calcul du temps séquentiel pour {}\n".format(instance_file))
+    print(cmd)
     os.system(cmd)
     
     while(len(open('graphs/data.txt').readlines()) < 1):
@@ -66,11 +67,10 @@ def launch_graph(i, n):
 
     # boucle de lancement des commandes
     dicos = []
-    iterations = 10
+    iterations = 1
     if i == len(list_instances) - 1:
         iterations = 1
     for i in range(iterations):
-        print("instance : " + instance_file + ", mesure numéro " + str(i) + '\n')
         nb_lines = start_program(iter_min, iter_max, step, instance_file)
         # remplir le dico
         d = fill_dico(fichier, nb_lines)
@@ -91,6 +91,9 @@ argLength = len(sys.argv)
 num_machines = 0
 if argLength == 2:
     num_machines = sys.argv[1]
+    if(num_machines <= 2):
+        print("Erreur, il faut indiquer un nombre de travailleurs >= 3.\n")
+        quit()
 else:
     quit()
 
@@ -105,9 +108,9 @@ cmd = "make mpi=1"
 #cmd = "make para=1"
 os.system(cmd)
 
-iter_min = 2
+iter_min = 3
 iter_max = int(num_machines)
-step = 1
+step = 2
 
 for i in range(len(list_instances)):
     print("Start: {}".format(list_instances[i]))
