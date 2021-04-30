@@ -11,6 +11,8 @@ import operator
 from collections import Counter
 import json
 
+step = 4
+
 # file in which we save graph data
 graphs = open("graphs/graphs.txt", "w")
 
@@ -41,10 +43,10 @@ def start_program(iter_min, iter_max, step, instance_file):
 def fill_dico(fichier, nb_lines):
     dico=dict()
     fichier.seek(0)
-    for i in range(2,nb_lines):
+    for l in range(nb_lines - 1):
         line = fichier.readline()
         elems = line.split(" ")
-        dico[i] = float(elems[5].split('s')[0])
+        dico[2 + (step * l)] = float(elems[5].split('s')[0])
     return dico
 
 def launch_graph(i, n):
@@ -111,7 +113,6 @@ os.system(cmd)
 
 iter_min = 3
 iter_max = int(num_machines)
-step = 4
 
 for i in range(len(list_instances)):
     print("Start: {}".format(list_instances[i]))
