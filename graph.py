@@ -20,9 +20,7 @@ list_instances = [
     "matching10.ec",
     "pentomino_6_10.ec",
     "pento_plus_tetra_2x4x10.ec",
-    "pento_plus_tetra_8x10.ec",
     "pento_plus_tetra_8x8_secondary.ec",
-    "rmols10.ec"
 ]
 
 def start_program(iter_min, iter_max, step, instance_file):
@@ -89,7 +87,10 @@ def launch_graph(i, n):
 
     # boucle de lancement des commandes
     dicos = []
-    for i in range(10):
+    iterations = 10
+    if i == len(list_instances) - 1:
+        iterations = 1
+    for i in range(iterations):
         print("instance : " + instance_file + ", mesure numéro " + str(i) + '\n')
         nb_lines = start_program(iter_min, iter_max, step, instance_file)
         # remplir le dico
@@ -99,7 +100,7 @@ def launch_graph(i, n):
 
     # moyenne
     total = sum(map(Counter, dicos), Counter())
-    dico = {k : v/10 for k,v in total.items()}
+    dico = {k : v/iterations for k,v in total.items()}
 
     # affichage
     draw_fig(dico, instance_file, n, t_seq)
