@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import json
 
 def draw_fig(dico, file, n, t_seq):
-    title = "Temps d'execution en fonction du nombre de processeurs\n Instance : {}\n Cluster Grid'5000: Gros à Nancy\n".format(file)
+    title = "Temps d'execution en fonction du nombre de processeurs\n Instance : {}\n".format(file)
     fig, ax = plt.subplots(figsize=(10,10))
     plt.title(title)
     dico_list = sorted(dico.items())
