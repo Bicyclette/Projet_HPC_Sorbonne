@@ -41,7 +41,7 @@ def start_program(iter_min, iter_max, step, instance_file):
 def fill_dico(fichier, nb_lines):
     dico=dict()
     fichier.seek(0)
-    for i in range(1,nb_lines):
+    for i in range(2,nb_lines):
         line = fichier.readline()
         elems = line.split(" ")
         dico[i] = float(elems[5].split('s')[0])
