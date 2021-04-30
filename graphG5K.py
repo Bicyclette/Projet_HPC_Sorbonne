@@ -24,7 +24,7 @@ list_instances = [
     "matching10.ec",
     "pentomino_6_10.ec",
     "pento_plus_tetra_2x4x10.ec",
-    "pento_plus_tetra_8x8_secondary.ec"
+#    "pento_plus_tetra_8x8_secondary.ec"
 ]
 
 def start_program(iter_min, iter_max, step, instance_file):
