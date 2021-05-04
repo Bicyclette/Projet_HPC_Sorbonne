@@ -6,7 +6,7 @@
 #include <err.h>
 #include <getopt.h>
 #include <sys/time.h>
-
+#include <omp.h>
 
 double start = 0.0;
 
@@ -530,17 +530,20 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
                 return;           /* échec : impossible de couvrir chosen_item */
         cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
-        for (int k = 0; k < active_options->len; k++) {
-                int option = active_options->p[k];
-                ctx->child_num[ctx->level] = k;
-                choose_option(instance, ctx, option, chosen_item);
-                solve(instance, ctx);
-                if (ctx->solutions >= max_solutions)
-                        return;
-                unchoose_option(instance, ctx, option, chosen_item);
+
+        for(int k = 0; k < active_options->len; k++)
+		{
+			int option = active_options->p[k];
+			ctx->child_num[ctx->level] = k;
+			choose_option(instance, ctx, option, chosen_item);
+			#pragma omp task
+			solve(instance, ctx);
+			if (ctx->solutions >= max_solutions)
+				return;
+			unchoose_option(instance, ctx, option, chosen_item);
         }
 
-        uncover(instance, ctx, chosen_item);                      /* backtrack */
+		uncover(instance, ctx, chosen_item);                      /* backtrack */
 }
 
 int main(int argc, char **argv)
@@ -579,7 +582,10 @@ int main(int argc, char **argv)
         struct instance_t * instance = load_matrix(in_filename);
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
-        solve(instance, ctx);
+
+		#pragma omp parallel
+		#pragma omp single
+		solve(instance, ctx);
         printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
                         wtime() - start);
         exit(EXIT_SUCCESS);

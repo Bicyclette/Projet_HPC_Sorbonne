@@ -5,6 +5,7 @@ exact_cover_mpi
 exact_cover_omp
 exact_cover_para
 graphs
+docs
 
 # Prerequisites
 *.d
