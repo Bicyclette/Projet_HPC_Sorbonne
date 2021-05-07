@@ -627,9 +627,6 @@ void master(int num_options, struct context_t* ctx)
 		free(local_slaves[i]);
 	}
 	free(local_slaves);
-
-	if(master_rank != -1)
-		MPI_Ssend(&ctx->solutions, 1, MPI_INT, master_rank, SOLUTIONS, MPI_COMM_WORLD);
 }
 
 void solve(const struct instance_t *instance, struct context_t *ctx, int begin);
