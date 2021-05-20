@@ -12,6 +12,7 @@ int comm_size;
 int proc_rank;
 MPI_Status status;
 int * msg;
+bool workers_free = true;
 
 double start = 0.0;
 
@@ -550,7 +551,6 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
 
 void master(int num_options, const struct instance_t *instance, struct context_t* ctx)
 {
-	int solutions = 0;
 	int slave_finished = 0;
 	int next_machine = 1;
 	int * slaves = calloc(comm_size, sizeof(int));
@@ -564,7 +564,7 @@ void master(int num_options, const struct instance_t *instance, struct context_t
 	int local_begin = 0;
 	int step = num_machines;
 
-	for(int i = 1; i < num_machines; ++i, ++next_machine)
+	for(int i = 1; i <= num_machines; ++i, ++next_machine)
 	{
 		MPI_Send(&local_begin, 1, MPI_INT, i, STOP_BEGIN, MPI_COMM_WORLD);
 		MPI_Send(&step, 1, MPI_INT, i, STEP, MPI_COMM_WORLD);
@@ -574,9 +574,11 @@ void master(int num_options, const struct instance_t *instance, struct context_t
 		slaves[i] = 0;
 	}
 
+	printf("next machine = %d\n", next_machine);
+
 	while(slave_finished < comm_size-1)
 	{
-		MPI_Recv(msg, instance->n_items + 1, MPI_INT, MPI_ANY_SOURCE, MSG_SLAVE, MPI_COMM_WORLD, &status);
+		MPI_Recv(msg, instance->n_items + 2, MPI_INT, MPI_ANY_SOURCE, MSG_SLAVE, MPI_COMM_WORLD, &status);
 
 		if (msg[0] < 0){ // delegation de boulot
 			n_options_slave = -msg[0];
@@ -591,15 +593,18 @@ void master(int num_options, const struct instance_t *instance, struct context_t
 					MPI_Send(&local_begin, 1, MPI_INT, i, STOP_BEGIN, MPI_COMM_WORLD);
 					MPI_Send(&step, 1, MPI_INT, i, STEP, MPI_COMM_WORLD);
 					MPI_Send(&ctx->level, 1, MPI_INT, i, LEVEL, MPI_COMM_WORLD);
-					MPI_Send(msg+1, instance->n_items, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+					MPI_Send(msg+2, instance->n_items, MPI_INT, i, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
 					local_begin++;
 					next_machine++;
 					slaves[i] = 0;
 				}
 			}
 		} else{
-			solutions+=msg[0];
-			slave_finished++;
+			if(msg[1] == 1)
+			{
+				ctx->solutions+=msg[0];
+				slave_finished++;
+			}
 		}
 	}
 	free(slaves);
@@ -621,12 +626,11 @@ void slave(const struct instance_t *instance, struct context_t *ctx)
 
 	MPI_Recv(&step, 1, MPI_INT, 0, STEP, MPI_COMM_WORLD, &status);
 	MPI_Recv(&local_level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
-	MPI_Recv(ctx->chosen_options, local_level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
+	MPI_Recv(ctx->chosen_options, instance->n_items, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
 	for(int i = 0 ; i < local_level; ++i)
 	{
 		choose_option(instance, ctx, ctx->chosen_options[i], -1);
 	}
-
 	solve(instance, ctx, begin, step);
 }
 
@@ -651,16 +655,18 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int begin, 
 			if (proc_rank == 0){
 				master(active_options->len, instance, ctx);
 				return;
-			} else{
+			} else if(workers_free){
 				msg[0] = -active_options->len;
 				for (int i =0; i < instance->n_items; i++){
-					msg[i+1] = ctx->chosen_options[i];
+					msg[i+2] = ctx->chosen_options[i];
 				}
-				MPI_Send(msg, instance->n_items+1, MPI_INT, 0, MSG_SLAVE, MPI_COMM_WORLD);
+				MPI_Send(msg, instance->n_items+2, MPI_INT, 0, MSG_SLAVE, MPI_COMM_WORLD);
 				MPI_Recv(&local_step, 1, MPI_INT, 0, STEP, MPI_COMM_WORLD, &status);
 				if (local_step>1){
 					local_begin = 0;
 				}
+				else
+					workers_free = false;
 			}
 		}
 
@@ -688,9 +694,13 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int begin, 
 				if (ctx->solutions >= max_solutions)
 						return;
 				unchoose_option(instance, ctx, option, chosen_item);
+				msg[0] = ctx->solutions;
+				if(k + local_step >= active_options->len)
+					msg[1] = 1;
+				else
+					msg[1] = 0;
+				MPI_Send(msg, instance->n_items+2, MPI_INT, 0, MSG_SLAVE, MPI_COMM_WORLD);
 			}
-			msg[0] = ctx->solutions;
-			MPI_Send(msg, instance->n_items+1, MPI_INT, 0, MSG_SLAVE, MPI_COMM_WORLD);
 		}
         uncover(instance, ctx, chosen_item);                      /* backtrack */
 }
@@ -774,7 +784,7 @@ int main(int argc, char **argv)
 
 	struct context_t * ctx = backtracking_setup(instance);
 
-	msg = calloc(instance->n_items + 1, sizeof(int));
+	msg = calloc(instance->n_items + 2, sizeof(int));
 	start = wtime();
 	
 	if(proc_rank == 0)

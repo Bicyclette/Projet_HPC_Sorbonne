@@ -6,12 +6,15 @@
 #include <err.h>
 #include <getopt.h>
 #include <sys/time.h>
-#include <omp.h>
 
-int lvl_dispatch = -1;
-long long int sol = 0;
-bool stop = false;
-int lvl = 0;
+#define MAX_DEPTH 15
+#define NUM_WORKERS 64
+
+int level = 0;
+int* num_options_per_level;
+int num_nodes;
+int* opts_per_nodes;
+
 double start = 0.0;
 
 char *in_filename = NULL;              // nom du fichier contenant la matrice
@@ -519,7 +522,7 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
         return ctx;
 }
 
-void solve(const struct instance_t *instance, struct context_t *ctx, int lvl)
+void solve(const struct instance_t *instance, struct context_t *ctx)
 {
         ctx->nodes++;
         if (ctx->nodes == next_report)
@@ -530,82 +533,98 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int lvl)
         }
         int chosen_item = choose_next_item(ctx);
         struct sparse_array_t *active_options = ctx->active_options[chosen_item];
-        if(sparse_array_empty(active_options))
-		{
+        if (sparse_array_empty(active_options))
                 return;           /* échec : impossible de couvrir chosen_item */
-		}
-		cover(instance, ctx, chosen_item);
+        cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
-
-		if(active_options->len >= omp_get_max_threads() && lvl_dispatch == -1)
-		{
-			lvl_dispatch = lvl;
-		}
-
-        for(int k = 0; k < active_options->len; k++)
-		{
-			if(lvl == lvl_dispatch && lvl_dispatch != -1)
-			{
-				#pragma omp task
-				{
-					struct context_t * ctx_thr = backtracking_setup(instance);
-        			for(int i = 0; i < lvl; ++i)
-						choose_option(instance, ctx_thr, ctx->chosen_options[i], -1);
-					ctx_thr->nodes++;
-        			if(ctx_thr->nodes == next_report)
-					{
-						progress_report(ctx_thr);
-					}
-					if(sparse_array_empty(ctx_thr->active_items))
-					{
-						solution_found(instance, ctx_thr);
-						stop = true;
-					}
-					if(!stop)
-					{
-        				int chosen_item = choose_next_item(ctx_thr);
-        				struct sparse_array_t *active_options = ctx_thr->active_options[chosen_item];
-        				if(sparse_array_empty(active_options))
-						{
-							stop = true;
-						}
-						if(!stop)
-						{
-							cover(instance, ctx_thr, chosen_item);
- 		       				ctx_thr->num_children[ctx_thr->level] = active_options->len;
-
-							int option = active_options->p[k];
-							ctx_thr->child_num[ctx_thr->level] = k;
-							choose_option(instance, ctx_thr, option, chosen_item);
-							solve(instance, ctx_thr, lvl + 1);
-							if(ctx_thr->solutions >= max_solutions)
-								stop = true;
-							if(!stop)
-								unchoose_option(instance, ctx_thr, option, chosen_item);
-							#pragma omp critical
-							{
-								if(lvl == lvl_dispatch)
-									sol += ctx_thr->solutions;
-							}
-						}
-					}
-				}
-				if(stop)
-					return;
-			}
-			else
-			{
-				int option = active_options->p[k];
-				ctx->child_num[ctx->level] = k;
-				choose_option(instance, ctx, option, chosen_item);
-				solve(instance, ctx, lvl + 1);
-				if(ctx->solutions >= max_solutions)
-					return;
-				unchoose_option(instance, ctx, option, chosen_item);
-			}
+        for (int k = 0; k < active_options->len; k++) {
+                int option = active_options->p[k];
+                ctx->child_num[ctx->level] = k;
+                choose_option(instance, ctx, option, chosen_item);
+                solve(instance, ctx);
+                if (ctx->solutions >= max_solutions)
+                        return;
+                unchoose_option(instance, ctx, option, chosen_item);
         }
 
-		uncover(instance, ctx, chosen_item);                      /* backtrack */
+        uncover(instance, ctx, chosen_item);                      /* backtrack */
+}
+
+void BFS(const struct instance_t *instance, struct context_t * ctx, int lvl)
+{
+	ctx->nodes++;
+	if(ctx->nodes == next_report)
+		progress_report(ctx);
+	if(sparse_array_empty(ctx->active_items))
+	{
+		solution_found(instance, ctx);
+		return;                         /* succès : plus d'objet actif */
+	}
+	int chosen_item = choose_next_item(ctx);
+	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+
+	int index = (0 > lvl - 1) ? 0 : lvl - 1;
+	if(lvl > MAX_DEPTH || num_options_per_level[index] >= NUM_WORKERS)
+		return;
+
+	if(sparse_array_empty(active_options))
+		return;           /* échec : impossible de couvrir chosen_item */
+	cover(instance, ctx, chosen_item);
+	ctx->num_children[ctx->level] = active_options->len;
+
+	num_options_per_level[lvl] += active_options->len;
+	for(int k = 0; k < active_options->len; k++)
+	{
+		int option = active_options->p[k];
+		ctx->child_num[ctx->level] = k;
+		choose_option(instance, ctx, option, chosen_item);
+		BFS(instance, ctx, lvl+1);
+		if(ctx->solutions >= max_solutions)
+			return;
+		unchoose_option(instance, ctx, option, chosen_item);
+	}
+	uncover(instance, ctx, chosen_item);                      /* backtrack */
+}
+		
+void get_num_nodes(const struct instance_t *instance, struct context_t * ctx, int lvl)
+{
+	static int index = 0;
+	ctx->nodes++;
+	if(ctx->nodes == next_report)
+		progress_report(ctx);
+	if(sparse_array_empty(ctx->active_items))
+	{
+		solution_found(instance, ctx);
+		return;                         /* succès : plus d'objet actif */
+	}
+	int chosen_item = choose_next_item(ctx);
+	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+
+	if(lvl == level)
+	{
+		opts_per_nodes[index++] = active_options->len;
+		num_nodes++;
+		return;
+	}
+
+	if(sparse_array_empty(active_options))
+		return;           /* échec : impossible de couvrir chosen_item */
+	cover(instance, ctx, chosen_item);
+	ctx->num_children[ctx->level] = active_options->len;
+
+	num_options_per_level[lvl] += active_options->len;
+	for(int k = 0; k < active_options->len; k++)
+	{
+		int option = active_options->p[k];
+		ctx->child_num[ctx->level] = k;
+		choose_option(instance, ctx, option, chosen_item);
+		get_num_nodes(instance, ctx, lvl+1);
+		if(ctx->solutions >= max_solutions)
+			return;
+		unchoose_option(instance, ctx, option, chosen_item);
+	}
+	uncover(instance, ctx, chosen_item);                      /* backtrack */
+	
 }
 
 int main(int argc, char **argv)
@@ -643,18 +662,30 @@ int main(int argc, char **argv)
 
         struct instance_t * instance = load_matrix(in_filename);
         struct context_t * ctx = backtracking_setup(instance);
-        start = wtime();
-
-		printf("num threads = %d\n", omp_get_max_threads());
-		#pragma omp parallel
+		num_options_per_level = calloc(MAX_DEPTH, sizeof(int));
+		BFS(instance, ctx, 0);
+		for(int i = 0; i < MAX_DEPTH; ++i)
 		{
-			#pragma omp single
+			printf("niveau %d => %d options\n", i, num_options_per_level[i]);
+			if(num_options_per_level[i] >= NUM_WORKERS)
 			{
-				solve(instance, ctx, lvl);
+				level = i;
+				break;
 			}
 		}
-        //printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
-        printf("FINI. Trouvé %lld solutions en %.3fs\n", sol, 
+		printf("niveau de distribution = %d\n", level);
+		free(num_options_per_level);
+		opts_per_nodes = calloc(NUM_WORKERS, sizeof(int));
+		get_num_nodes(instance, ctx, 0);
+		printf("Il y a %d nodes sur le niveau %d\n", num_nodes, level);
+		for(int i = 0; i < num_nodes; ++i)
+		{
+			printf("node %d contient %d options\n", i, opts_per_nodes[i]);
+		}
+		free(opts_per_nodes);
+        start = wtime();
+        solve(instance, ctx);
+        printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, 
                         wtime() - start);
         exit(EXIT_SUCCESS);
 }
