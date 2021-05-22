@@ -11,7 +11,6 @@
 int lvl_dispatch = -1;
 long long int sol = 0;
 bool stop = false;
-int lvl = 0;
 double start = 0.0;
 
 char *in_filename = NULL;              // nom du fichier contenant la matrice
@@ -649,7 +648,7 @@ int main(int argc, char **argv)
 		{
 			#pragma omp single
 			{
-				solve(instance, ctx, lvl);
+				solve(instance, ctx, 0);
 			}
 		}
         //printf("FINI. Trouvé %lld solutions en %.1fs\n", ctx->solutions, 
