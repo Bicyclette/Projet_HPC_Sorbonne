@@ -9,6 +9,7 @@
 #include <mpi.h>
 #include <omp.h>
 
+#define MAX_WORKERS 32
 #define MAX_DEPTH 15
 
 int level = 0;
@@ -562,7 +563,7 @@ void master(struct context_t* ctx)
 	int local_begin = 0;
 	while(proc < comm_size)
 	{
-		for(int j = 0; j < num_nodes; ++j, ++proc)
+		for(int j = 0; j < num_nodes && proc < comm_size; ++j, ++proc)
 		{
 			MPI_Send(&local_begin, 1, MPI_INT, proc, STOP_BEGIN, MPI_COMM_WORLD);
 			MPI_Send(&level, 1, MPI_INT, proc, LEVEL, MPI_COMM_WORLD);
@@ -867,7 +868,7 @@ int main(int argc, char **argv)
 		free(num_options_per_level);
 			
 		opts_per_nodes = calloc((comm_size-1), sizeof(int));
-		chosen_options_per_nodes = malloc((comm_size-1) * sizeof(int*));
+		chosen_options_per_nodes = malloc(MAX_WORKERS * sizeof(int*));
 		for(int i = 0; i < (comm_size-1); ++i)
 			chosen_options_per_nodes[i] = calloc(instance->n_items, sizeof(int));
 		get_num_nodes(instance, ctx, 0);

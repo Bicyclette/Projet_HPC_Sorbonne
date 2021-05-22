@@ -23,12 +23,12 @@ graphs = ""
 list_instances = [
     "bell12.ec",
     "bell13.ec",
-    #"bell14.ec",
-    #"matching8.ec",
-    #"matching9.ec",
-    #"matching10.ec",
-    #"pentomino_6_10.ec",
-    #"pento_plus_tetra_2x4x10.ec"
+    "bell14.ec",
+    "matching8.ec",
+    "matching9.ec",
+    "matching10.ec",
+    "pentomino_6_10.ec",
+    "pento_plus_tetra_2x4x10.ec"
 ]
 
 def start_program(iter_min, iter_max, step, instance_file):
@@ -39,8 +39,8 @@ def start_program(iter_min, iter_max, step, instance_file):
             os.environ["OMP_NUM_THREADS"] = str(i)
             prog_cmd = program + " --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
         else:
-            #prog_cmd = "mpirun -np " + str(i) + " --mca btl_base_warn_component_unused 0 -machinefile $OAR_NODEFILE " + program + " --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
-            prog_cmd = "mpirun -np " + str(i) + " " + program + " --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
+            prog_cmd = "mpirun -np " + str(i) + " --mca btl_base_warn_component_unused 0 -machinefile $OAR_NODEFILE " + program + " --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
+            #prog_cmd = "mpirun -np " + str(i) + " " + program + " --in instances/" + instance_file + " --progress-report 0 >> graphs/data.txt"
         os.system(prog_cmd)
         print(prog_cmd)
         while(len(open('graphs/data.txt').readlines()) < next):
