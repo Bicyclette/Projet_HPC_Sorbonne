@@ -23,28 +23,28 @@ endif
 # FILES ==========
 # ================
 SRC = src/exact_cover.c
-ifdef mpi
-	SRC = src/exact_cover_mpi.c
+ifdef final
+	SRC = src/exact_cover_para.c
 else
 	ifdef omp
 		SRC = src/exact_cover_omp.c
 	else
-		ifdef final
-			SRC = src/exact_cover_para.c
+		ifdef mpi
+			SRC = src/exact_cover_mpi.c
 		endif
 	endif
 endif
 
 # PROGRAM NAME ==========
 # =======================
-ifdef mpi
-	PROGRAM = exact_cover_mpi
+ifdef final
+	PROGRAM = exact_cover_para
 else
 	ifdef omp
 		PROGRAM = exact_cover_omp
 	else
-		ifdef final
-			PROGRAM = exact_cover_para
+		ifdef mpi
+			PROGRAM = exact_cover_mpi
 		endif
 	endif
 endif

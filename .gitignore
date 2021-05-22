@@ -1,5 +1,6 @@
 ### C ###
 # application dependant
+a.out
 exact_cover_seq
 exact_cover_mpi
 exact_cover_omp

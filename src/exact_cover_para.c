@@ -7,6 +7,7 @@
 #include <getopt.h>
 #include <sys/time.h>
 #include <mpi.h>
+#include <omp.h>
 
 #define MAX_DEPTH 15
 
@@ -24,7 +25,6 @@ MPI_Status status;
 int lvl_dispatch = -1;
 long long int sol = 0;
 bool stop = false;
-int lvl = 0;
 
 double start = 0.0;
 
@@ -79,7 +79,7 @@ enum MSG_TAG
 	STEP
 };
 
-void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step);
+void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step, int lvl);
 
 double wtime()
 {
@@ -547,7 +547,6 @@ void master(struct context_t* ctx)
 {
 	long long int msg;
 	int num_stop = 0;
-	int begin = 0;
 	int* step_per_nodes = calloc(num_nodes, sizeof(int));
 	
 	int proc = 1;
@@ -686,7 +685,7 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int begin, 
 				int option = active_options->p[k];
 				ctx->child_num[ctx->level] = k;
 				choose_option(instance, ctx, option, chosen_item);
-				solve(instance, ctx, lvl + 1);
+				solve(instance, ctx, 0, 1, lvl + 1);
 				if(ctx->solutions >= max_solutions)
 					return;
 				unchoose_option(instance, ctx, option, chosen_item);
