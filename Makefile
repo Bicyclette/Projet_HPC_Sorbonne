@@ -5,6 +5,10 @@ PROGRAM = exact_cover_seq
 CC = gcc
 ifdef mpi
 	CC = mpicc
+else
+	ifdef final
+		CC = mpicc
+	endif
 endif
 
 # DEFINE COMPILE FLAGS ==========
@@ -18,6 +22,10 @@ endif
 
 ifdef omp
 	CFLAGS += -fopenmp
+else
+	ifdef final
+		CFLAGS += -fopenmp
+	endif
 endif
 
 # FILES ==========

@@ -542,7 +542,6 @@ void master(struct context_t* ctx)
 {
 	long long int msg;
 	int num_stop = 0;
-	int begin = 0;
 	int* step_per_nodes = calloc(num_nodes, sizeof(int));
 	
 	int proc = 1;
