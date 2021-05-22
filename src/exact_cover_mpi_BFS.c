@@ -6,14 +6,20 @@
 #include <err.h>
 #include <getopt.h>
 #include <sys/time.h>
+#include <mpi.h>
 
 #define MAX_DEPTH 15
-#define NUM_WORKERS 64
 
 int level = 0;
 int* num_options_per_level;
 int num_nodes;
 int* opts_per_nodes;
+int** chosen_options_per_nodes;
+
+int step;
+int comm_size;
+int proc_rank;
+MPI_Status status;
 
 double start = 0.0;
 
@@ -59,6 +65,16 @@ static const char DIGITS[62] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
                                 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
                                 'U', 'V', 'W', 'X', 'Y', 'Z'};
 
+enum MSG_TAG
+{
+	STOP_BEGIN,
+	LEVEL,
+	CHOOSEN_OPTIONS,
+	SOLUTIONS,
+	STEP
+};
+
+void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step);
 
 double wtime()
 {
@@ -522,7 +538,66 @@ struct context_t * backtracking_setup(const struct instance_t *instance)
         return ctx;
 }
 
-void solve(const struct instance_t *instance, struct context_t *ctx)
+void master(struct context_t* ctx)
+{
+	long long int msg;
+	int num_stop = 0;
+	int begin = 0;
+	int* step_per_nodes = calloc(num_nodes, sizeof(int));
+	
+	int proc = 1;
+	while(proc < comm_size)
+	{
+		for(int j = 0; j < num_nodes; ++j, ++proc)
+		{
+			step_per_nodes[j]++;
+		}
+	}
+	proc = 1;
+
+	int local_begin = 0;
+	while(proc < comm_size)
+	{
+		for(int j = 0; j < num_nodes; ++j, ++proc)
+		{
+			MPI_Send(&local_begin, 1, MPI_INT, proc, STOP_BEGIN, MPI_COMM_WORLD);
+			MPI_Send(&level, 1, MPI_INT, proc, LEVEL, MPI_COMM_WORLD);
+			MPI_Send(&step_per_nodes[j], 1, MPI_INT, proc, STEP, MPI_COMM_WORLD);
+			MPI_Send(chosen_options_per_nodes[j], level, MPI_INT, proc, CHOOSEN_OPTIONS, MPI_COMM_WORLD);
+		}
+		local_begin++;
+	}
+
+	free(step_per_nodes);
+
+	ctx->solutions = 0;
+	while(num_stop < (comm_size-1))
+	{
+		MPI_Recv(&msg, 1, MPI_LONG_LONG_INT, MPI_ANY_SOURCE, SOLUTIONS, MPI_COMM_WORLD, &status);
+		ctx->solutions += msg;
+		num_stop++;
+	}
+}
+
+void slave(const struct instance_t *instance, struct context_t *ctx)
+{
+	int begin;
+	int local_level;
+
+	MPI_Recv(&begin, 1, MPI_INT, 0, STOP_BEGIN, MPI_COMM_WORLD, &status);
+	MPI_Recv(&local_level, 1, MPI_INT, 0, LEVEL, MPI_COMM_WORLD, &status);
+	MPI_Recv(&step, 1, MPI_INT, 0, STEP, MPI_COMM_WORLD, &status);
+	MPI_Recv(ctx->chosen_options, local_level, MPI_INT, 0, CHOOSEN_OPTIONS, MPI_COMM_WORLD, &status);
+	for(int i = 0 ; i < local_level; ++i)
+	{
+		choose_option(instance, ctx, ctx->chosen_options[i], -1);
+	}
+
+	solve(instance, ctx, begin, step);
+	MPI_Ssend(&ctx->solutions, 1, MPI_LONG_LONG_INT, 0, SOLUTIONS, MPI_COMM_WORLD);
+}
+
+void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step)
 {
         ctx->nodes++;
         if (ctx->nodes == next_report)
@@ -533,20 +608,22 @@ void solve(const struct instance_t *instance, struct context_t *ctx)
         }
         int chosen_item = choose_next_item(ctx);
         struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+
         if (sparse_array_empty(active_options))
                 return;           /* échec : impossible de couvrir chosen_item */
         cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
-        for (int k = 0; k < active_options->len; k++) {
+
+        for(int k = begin; k < active_options->len; k += step)
+		{
                 int option = active_options->p[k];
                 ctx->child_num[ctx->level] = k;
                 choose_option(instance, ctx, option, chosen_item);
-                solve(instance, ctx);
+                solve(instance, ctx, 0, 1);
                 if (ctx->solutions >= max_solutions)
                         return;
                 unchoose_option(instance, ctx, option, chosen_item);
         }
-
         uncover(instance, ctx, chosen_item);                      /* backtrack */
 }
 
@@ -564,7 +641,7 @@ void BFS(const struct instance_t *instance, struct context_t * ctx, int lvl)
 	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
 
 	int index = (0 > lvl - 1) ? 0 : lvl - 1;
-	if(lvl > MAX_DEPTH || num_options_per_level[index] >= NUM_WORKERS)
+	if(lvl > MAX_DEPTH || num_options_per_level[index] >= (comm_size-1))
 		return;
 
 	if(sparse_array_empty(active_options))
@@ -602,8 +679,11 @@ void get_num_nodes(const struct instance_t *instance, struct context_t * ctx, in
 
 	if(lvl == level)
 	{
-		opts_per_nodes[index++] = active_options->len;
+		opts_per_nodes[index] = active_options->len;
+		for(int i = 0; i < level; ++i)
+			chosen_options_per_nodes[index][i] = ctx->chosen_options[i];
 		num_nodes++;
+		index++;
 		return;
 	}
 
@@ -629,6 +709,11 @@ void get_num_nodes(const struct instance_t *instance, struct context_t * ctx, in
 
 int main(int argc, char **argv)
 {
+	MPI_Init(&argc, &argv);
+
+	MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
+	MPI_Comm_rank(MPI_COMM_WORLD, &proc_rank);
+
         struct option longopts[5] = {
                 {"in", required_argument, NULL, 'i'},
                 {"progress-report", required_argument, NULL, 'v'},
@@ -660,32 +745,81 @@ int main(int argc, char **argv)
         next_report = report_delta;
 
 
-        struct instance_t * instance = load_matrix(in_filename);
-        struct context_t * ctx = backtracking_setup(instance);
+	struct instance_t * instance;
+	
+	if(proc_rank == 0)
+	{
+		instance = load_matrix(in_filename);
+		int n_it = instance->n_items;
+		int n_op = instance->n_options;
+
+		// send instance to slaves
+		MPI_Bcast(&instance->n_items, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&instance->n_primary, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&instance->n_options, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(instance->options, n_op * n_it, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(instance->ptr, n_op + 1, MPI_INT, 0, MPI_COMM_WORLD);
+	}
+	else
+	{
+		instance = malloc(sizeof(*instance));
+		if(instance == NULL)
+			err(1, "Impossible d'allouer l'instance");
+		else
+		{
+			// receive instance from master
+			MPI_Bcast(&instance->n_items, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(&instance->n_primary, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(&instance->n_options, 1, MPI_INT, 0, MPI_COMM_WORLD);
+
+			int n_it = instance->n_items;
+			int n_op = instance->n_options;
+			instance->ptr = malloc((n_op + 1) * sizeof(int));
+			instance->options = malloc(n_it * n_op *sizeof(int));         // surallocation massive
+			instance->item_name = NULL;
+
+			MPI_Bcast(instance->options, n_op * n_it, MPI_INT, 0, MPI_COMM_WORLD);
+			MPI_Bcast(instance->ptr, n_op + 1, MPI_INT, 0, MPI_COMM_WORLD);
+		}
+	}
+
+	struct context_t * ctx = backtracking_setup(instance);
+
+	if(proc_rank == 0)
+	{
 		num_options_per_level = calloc(MAX_DEPTH, sizeof(int));
 		BFS(instance, ctx, 0);
 		for(int i = 0; i < MAX_DEPTH; ++i)
 		{
-			printf("niveau %d => %d options\n", i, num_options_per_level[i]);
-			if(num_options_per_level[i] >= NUM_WORKERS)
+			if(num_options_per_level[i] >= comm_size)
 			{
 				level = i;
 				break;
 			}
 		}
-		printf("niveau de distribution = %d\n", level);
 		free(num_options_per_level);
-		opts_per_nodes = calloc(NUM_WORKERS, sizeof(int));
+			
+		opts_per_nodes = calloc((comm_size-1), sizeof(int));
+		chosen_options_per_nodes = malloc((comm_size-1) * sizeof(int*));
+		for(int i = 0; i < (comm_size-1); ++i)
+			chosen_options_per_nodes[i] = calloc(instance->n_items, sizeof(int));
 		get_num_nodes(instance, ctx, 0);
-		printf("Il y a %d nodes sur le niveau %d\n", num_nodes, level);
-		for(int i = 0; i < num_nodes; ++i)
-		{
-			printf("node %d contient %d options\n", i, opts_per_nodes[i]);
-		}
+			
 		free(opts_per_nodes);
+
         start = wtime();
-        solve(instance, ctx);
-        printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, 
-                        wtime() - start);
-        exit(EXIT_SUCCESS);
+        master(ctx);
+        printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, wtime() - start);
+
+		for(int i = 0; i < (comm_size-1); ++i)
+			free(chosen_options_per_nodes[i]);
+		free(chosen_options_per_nodes);
+	}
+	else
+	{
+		slave(instance, ctx);
+	}
+
+	MPI_Finalize();
+	exit(EXIT_SUCCESS);
 }

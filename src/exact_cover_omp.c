@@ -645,7 +645,6 @@ int main(int argc, char **argv)
         struct context_t * ctx = backtracking_setup(instance);
         start = wtime();
 
-		printf("num threads = %d\n", omp_get_max_threads());
 		#pragma omp parallel
 		{
 			#pragma omp single
