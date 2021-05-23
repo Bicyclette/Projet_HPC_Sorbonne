@@ -8,7 +8,6 @@
 #include <sys/time.h>
 #include <mpi.h>
 
-#define MAX_WORKERS 32
 #define MAX_DEPTH 15
 
 int level = 0;
@@ -800,7 +799,7 @@ int main(int argc, char **argv)
 		}
 		free(num_options_per_level);
 		opts_per_nodes = calloc((comm_size-1), sizeof(int));
-		chosen_options_per_nodes = malloc(MAX_WORKERS * sizeof(int*));
+		chosen_options_per_nodes = malloc(comm_size * sizeof(int*));
 		for(int i = 0; i < (comm_size-1); ++i)
 			chosen_options_per_nodes[i] = calloc(instance->n_items, sizeof(int));
 		get_num_nodes(instance, ctx, 0);
