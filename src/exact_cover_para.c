@@ -12,7 +12,7 @@
 #define MAX_DEPTH 15
 
 int level = 0;
-int* num_options_per_level;
+int* num_options_per_level = NULL;
 int num_nodes;
 int* opts_per_nodes;
 int** chosen_options_per_nodes;
@@ -80,6 +80,7 @@ enum MSG_TAG
 };
 
 void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step, int lvl);
+void BFS_second(const struct instance_t *instance, struct context_t * ctx, int lvl);
 
 double wtime()
 {
@@ -596,6 +597,20 @@ void slave(const struct instance_t *instance, struct context_t *ctx)
 	{
 		choose_option(instance, ctx, ctx->chosen_options[i], -1);
 	}
+	
+	if(num_options_per_level != NULL)
+		free(num_options_per_level);
+	num_options_per_level = calloc(MAX_DEPTH, sizeof(int));
+	BFS_second(instance, ctx, local_level);
+	for(int i = 0; i < MAX_DEPTH; ++i)
+	{
+		if(num_options_per_level[i] >= omp_get_max_threads())
+		{
+			lvl_dispatch = i;
+			break;
+		}
+	}
+	free(num_options_per_level);
 
 	#pragma omp parallel
 	{
@@ -624,14 +639,9 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int begin, 
         cover(instance, ctx, chosen_item);
         ctx->num_children[ctx->level] = active_options->len;
 		
-		if(active_options->len >= omp_get_max_threads() && lvl_dispatch == -1)
-		{
-			lvl_dispatch = lvl;
-		}
-
         for(int k = begin; k < active_options->len; k += step)
 		{
-			if(lvl == lvl_dispatch && lvl_dispatch != -1)
+			if(lvl == lvl_dispatch)
 			{
 				#pragma omp task
 				{
@@ -692,6 +702,42 @@ void solve(const struct instance_t *instance, struct context_t *ctx, int begin, 
 			}
         }
         uncover(instance, ctx, chosen_item);                      /* backtrack */
+}
+
+void BFS_second(const struct instance_t *instance, struct context_t * ctx, int lvl)
+{
+	ctx->nodes++;
+	if(ctx->nodes == next_report)
+		progress_report(ctx);
+	if(sparse_array_empty(ctx->active_items))
+	{
+		solution_found(instance, ctx);
+		return;                         /* succès : plus d'objet actif */
+	}
+	int chosen_item = choose_next_item(ctx);
+	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+
+	int index = (0 > lvl - 1) ? 0 : lvl - 1;
+	if(lvl > (MAX_DEPTH + level) || num_options_per_level[index] >= omp_get_max_threads())
+		return;
+
+	if(sparse_array_empty(active_options))
+		return;           /* échec : impossible de couvrir chosen_item */
+	cover(instance, ctx, chosen_item);
+	ctx->num_children[ctx->level] = active_options->len;
+
+	num_options_per_level[lvl] += active_options->len;
+	for(int k = 0; k < active_options->len; k++)
+	{
+		int option = active_options->p[k];
+		ctx->child_num[ctx->level] = k;
+		choose_option(instance, ctx, option, chosen_item);
+		BFS_second(instance, ctx, lvl+1);
+		if(ctx->solutions >= max_solutions)
+			return;
+		unchoose_option(instance, ctx, option, chosen_item);
+	}
+	uncover(instance, ctx, chosen_item);                      /* backtrack */
 }
 
 void BFS(const struct instance_t *instance, struct context_t * ctx, int lvl)
@@ -867,6 +913,7 @@ int main(int argc, char **argv)
 			}
 		}
 		free(num_options_per_level);
+		num_options_per_level = NULL;
 			
 		opts_per_nodes = calloc((comm_size-1), sizeof(int));
 		chosen_options_per_nodes = malloc(comm_size * sizeof(int*));
