@@ -82,7 +82,7 @@ def launch_graph(i, n):
     dicos = []
     nb_lines = 0
     if local:
-        nb_lines = start_program(4, max_threads, 4, instance_file)
+        nb_lines = start_program(4, min(32, max_threads), 4, instance_file)
     else:
         nb_lines = start_program(iter_min, iter_max, step, instance_file)
     # remplir le dico
