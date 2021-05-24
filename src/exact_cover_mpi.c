@@ -598,32 +598,33 @@ void slave(const struct instance_t *instance, struct context_t *ctx)
 
 void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step)
 {
-        ctx->nodes++;
-        if (ctx->nodes == next_report)
-                progress_report(ctx);
-        if (sparse_array_empty(ctx->active_items)) {
-                solution_found(instance, ctx);
-                return;                         /* succès : plus d'objet actif */
-        }
-        int chosen_item = choose_next_item(ctx);
-        struct sparse_array_t *active_options = ctx->active_options[chosen_item];
+	ctx->nodes++;
+	if(ctx->nodes == next_report)
+		progress_report(ctx);
+	if(sparse_array_empty(ctx->active_items))
+	{
+		solution_found(instance, ctx);
+		return;                         /* succès : plus d'objet actif */
+	}
+	int chosen_item = choose_next_item(ctx);
+	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
 
-        if (sparse_array_empty(active_options))
-                return;           /* échec : impossible de couvrir chosen_item */
-        cover(instance, ctx, chosen_item);
-        ctx->num_children[ctx->level] = active_options->len;
+	if(sparse_array_empty(active_options))
+		return;           /* échec : impossible de couvrir chosen_item */
+	cover(instance, ctx, chosen_item);
+	ctx->num_children[ctx->level] = active_options->len;
 
-        for(int k = begin; k < active_options->len; k += step)
-		{
-                int option = active_options->p[k];
-                ctx->child_num[ctx->level] = k;
-                choose_option(instance, ctx, option, chosen_item);
-                solve(instance, ctx, 0, 1);
-                if (ctx->solutions >= max_solutions)
-                        return;
-                unchoose_option(instance, ctx, option, chosen_item);
-        }
-        uncover(instance, ctx, chosen_item);                      /* backtrack */
+	for(int k = begin; k < active_options->len; k += step)
+	{
+		int option = active_options->p[k];
+		ctx->child_num[ctx->level] = k;
+		choose_option(instance, ctx, option, chosen_item);
+		solve(instance, ctx, 0, 1);
+		if(ctx->solutions >= max_solutions)
+			return;
+		unchoose_option(instance, ctx, option, chosen_item);
+	}
+	uncover(instance, ctx, chosen_item);                      /* backtrack */
 }
 
 void BFS(const struct instance_t *instance, struct context_t * ctx, int lvl)
