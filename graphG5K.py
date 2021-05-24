@@ -55,7 +55,7 @@ def fill_dico(fichier, nb_lines, t_seq):
         line = fichier.readline()
         elems = line.split(" ")
         if local:
-            dico[1 + l] = [float(t_seq) / float(elems[5].split('s')[0]), float(elems[5].split('s')[0])]
+            dico[4 + (step * l)] = [float(t_seq) / float(elems[5].split('s')[0]), float(elems[5].split('s')[0])]
         else:
             dico[2 + (step * l)] = [float(t_seq) / float(elems[5].split('s')[0]), float(elems[5].split('s')[0])]
     return dico
