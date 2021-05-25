@@ -788,6 +788,7 @@ int main(int argc, char **argv)
 
 	if(proc_rank == 0)
 	{
+        start = wtime();
 		num_options_per_level = calloc(MAX_DEPTH, sizeof(int));
 		BFS(instance, ctx, 0);
 		for(int i = 0; i < MAX_DEPTH; ++i)
@@ -807,7 +808,6 @@ int main(int argc, char **argv)
 			
 		free(opts_per_nodes);
 
-        start = wtime();
         master(ctx);
         printf("FINI. Trouvé %lld solutions en %.3fs\n", ctx->solutions, wtime() - start);
 
