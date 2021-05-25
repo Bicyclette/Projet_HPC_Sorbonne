@@ -54,7 +54,7 @@ def draw_fig_acceleration(dico, file, n):
     for k,v in dico.items():
         x.append(k)
         y.append(round(v[0], 3))
-        lineaire.append(k)
+        lineaire.append(float(k))
         plt.scatter(k, v[0], c="blue")
     
     plt.grid(True, "both")
@@ -62,10 +62,10 @@ def draw_fig_acceleration(dico, file, n):
 
     for cx, cy in zip(x, y):
         plt.text(cx, cy, '({}, {})'.format(cx, cy))
-    plt.plot(x,y, label="Accélération", c="blue")
     plt.plot(x,lineaire, label="Accélération linéaire", c="red")
+    plt.plot(x,y, label="Accélération", c="blue")
     plt.legend(fontsize=18)
-
+    
     if omp:
        plt.xlabel('Nombre de threads')
        plt.savefig("graphs/omp/delta_speed/{}".format(file.split(".")[0]))
