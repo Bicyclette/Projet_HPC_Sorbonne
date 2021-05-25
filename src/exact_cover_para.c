@@ -80,7 +80,6 @@ enum MSG_TAG
 };
 
 void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step, int lvl);
-void BFS_second(const struct instance_t *instance, struct context_t * ctx, int lvl);
 
 double wtime()
 {
@@ -598,113 +597,18 @@ void slave(const struct instance_t *instance, struct context_t *ctx)
 		choose_option(instance, ctx, ctx->chosen_options[i], -1);
 	}
 	
-	if(num_options_per_level != NULL)
-		free(num_options_per_level);
-	num_options_per_level = calloc(MAX_DEPTH, sizeof(int));
-	BFS_second(instance, ctx, local_level);
-	for(int i = 0; i < MAX_DEPTH; ++i)
-	{
-		if(num_options_per_level[i] >= omp_get_max_threads())
-		{
-			lvl_dispatch = i;
-			break;
-		}
-	}
-	free(num_options_per_level);
-
+	lvl_dispatch = local_level;
 	#pragma omp parallel
 	{
 		#pragma omp single
 		{
-			solve(instance, ctx, begin, step, 0);
+			solve(instance, ctx, begin, step, local_level);
 		}
 	}
 	MPI_Ssend(&sol, 1, MPI_LONG_LONG_INT, 0, SOLUTIONS, MPI_COMM_WORLD);
 }
 
 void solve(const struct instance_t *instance, struct context_t *ctx, int begin, int step, int lvl)
-{
-        ctx->nodes++;
-        if (ctx->nodes == next_report)
-                progress_report(ctx);
-        if (sparse_array_empty(ctx->active_items)) {
-                solution_found(instance, ctx);
-                return;                         /* succès : plus d'objet actif */
-        }
-        int chosen_item = choose_next_item(ctx);
-        struct sparse_array_t *active_options = ctx->active_options[chosen_item];
-
-        if (sparse_array_empty(active_options))
-                return;           /* échec : impossible de couvrir chosen_item */
-        cover(instance, ctx, chosen_item);
-        ctx->num_children[ctx->level] = active_options->len;
-		
-        for(int k = begin; k < active_options->len; k += step)
-		{
-			if(lvl == lvl_dispatch)
-			{
-				#pragma omp task
-				{
-					struct context_t * ctx_thr = backtracking_setup(instance);
-        			for(int i = 0; i < lvl; ++i)
-						choose_option(instance, ctx_thr, ctx->chosen_options[i], -1);
-					ctx_thr->nodes++;
-        			if(ctx_thr->nodes == next_report)
-					{
-						progress_report(ctx_thr);
-					}
-					if(sparse_array_empty(ctx_thr->active_items))
-					{
-						solution_found(instance, ctx_thr);
-						stop = true;
-					}
-					if(!stop)
-					{
-        				int chosen_item = choose_next_item(ctx_thr);
-        				struct sparse_array_t *active_options = ctx_thr->active_options[chosen_item];
-        				if(sparse_array_empty(active_options))
-						{
-							stop = true;
-						}
-						if(!stop)
-						{
-							cover(instance, ctx_thr, chosen_item);
- 		       				ctx_thr->num_children[ctx_thr->level] = active_options->len;
-
-							int option = active_options->p[k];
-							ctx_thr->child_num[ctx_thr->level] = k;
-							choose_option(instance, ctx_thr, option, chosen_item);
-							solve(instance, ctx_thr, 0, 1, lvl + 1);
-							if(ctx_thr->solutions >= max_solutions)
-								stop = true;
-							if(!stop)
-								unchoose_option(instance, ctx_thr, option, chosen_item);
-							#pragma omp critical
-							{
-								if(lvl == lvl_dispatch)
-									sol += ctx_thr->solutions;
-							}
-						}
-					}
-				}
-				if(stop)
-					return;
-			}
-			else
-			{
-				int option = active_options->p[k];
-				ctx->child_num[ctx->level] = k;
-				choose_option(instance, ctx, option, chosen_item);
-				solve(instance, ctx, 0, 1, lvl + 1);
-				if(ctx->solutions >= max_solutions)
-					return;
-				unchoose_option(instance, ctx, option, chosen_item);
-			}
-        }
-        uncover(instance, ctx, chosen_item);                      /* backtrack */
-}
-
-void BFS_second(const struct instance_t *instance, struct context_t * ctx, int lvl)
 {
 	ctx->nodes++;
 	if(ctx->nodes == next_report)
@@ -717,25 +621,74 @@ void BFS_second(const struct instance_t *instance, struct context_t * ctx, int l
 	int chosen_item = choose_next_item(ctx);
 	struct sparse_array_t *active_options = ctx->active_options[chosen_item];
 
-	int index = (0 > lvl - 1) ? 0 : lvl - 1;
-	if(lvl > (MAX_DEPTH + level) || num_options_per_level[index] >= omp_get_max_threads())
-		return;
-
 	if(sparse_array_empty(active_options))
 		return;           /* échec : impossible de couvrir chosen_item */
 	cover(instance, ctx, chosen_item);
 	ctx->num_children[ctx->level] = active_options->len;
-
-	num_options_per_level[lvl] += active_options->len;
-	for(int k = 0; k < active_options->len; k++)
+	
+	for(int k = begin; k < active_options->len; k += step)
 	{
-		int option = active_options->p[k];
-		ctx->child_num[ctx->level] = k;
-		choose_option(instance, ctx, option, chosen_item);
-		BFS_second(instance, ctx, lvl+1);
-		if(ctx->solutions >= max_solutions)
-			return;
-		unchoose_option(instance, ctx, option, chosen_item);
+		if(lvl == lvl_dispatch)
+		{
+			#pragma omp task
+			{
+				struct context_t * ctx_thr = backtracking_setup(instance);
+				for(int i = 0; i < lvl; ++i)
+					choose_option(instance, ctx_thr, ctx->chosen_options[i], -1);
+				ctx_thr->nodes++;
+				if(ctx_thr->nodes == next_report)
+				{
+					progress_report(ctx_thr);
+				}
+				if(sparse_array_empty(ctx_thr->active_items))
+				{
+					solution_found(instance, ctx_thr);
+					stop = true;
+				}
+				if(!stop)
+				{
+					int chosen_item = choose_next_item(ctx_thr);
+					struct sparse_array_t *active_options = ctx_thr->active_options[chosen_item];
+					if(sparse_array_empty(active_options))
+					{
+						stop = true;
+					}
+					if(!stop)
+					{
+						cover(instance, ctx_thr, chosen_item);
+						ctx_thr->num_children[ctx_thr->level] = active_options->len;
+
+						int option = active_options->p[k];
+						ctx_thr->child_num[ctx_thr->level] = k;
+						choose_option(instance, ctx_thr, option, chosen_item);
+						solve(instance, ctx_thr, 0, 1, lvl + 1);
+						if(ctx_thr->solutions >= max_solutions)
+							stop = true;
+						if(!stop)
+							unchoose_option(instance, ctx_thr, option, chosen_item);
+						#pragma omp critical
+						{
+							if(lvl == lvl_dispatch)
+							{
+								sol += ctx_thr->solutions;
+							}
+						}
+					}
+				}
+			}
+			if(stop)
+				return;
+		}
+		else
+		{
+			int option = active_options->p[k];
+			ctx->child_num[ctx->level] = k;
+			choose_option(instance, ctx, option, chosen_item);
+			solve(instance, ctx, 0, 1, lvl + 1);
+			if(ctx->solutions >= max_solutions)
+				return;
+			unchoose_option(instance, ctx, option, chosen_item);
+		}
 	}
 	uncover(instance, ctx, chosen_item);                      /* backtrack */
 }

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import json
 
 def draw_fig_temps_exec(dico, file, n, t_seq):
-    title = "INSTANCE : {}\n".format(file)
+    title = "INSTANCE : {}\nTemps séquentiel = {}s".format(file, t_seq)
     fig, ax = plt.subplots(figsize=(10,10))
     plt.title(title, fontsize="22")
     dico_list = sorted(dico.items())
@@ -26,13 +26,13 @@ def draw_fig_temps_exec(dico, file, n, t_seq):
 
     for cx, cy in zip(x, y):
         plt.text(cx, cy, '({}, {})'.format(cx, cy))
-    plt.plot(x,y, label="Temps d'éxecution", c="blue")
+    plt.plot(x,y, label="Temps d'exécution", c="blue")
 
     if omp:
        plt.xlabel('Nombre de threads')
     else:
-       plt.xlabel('Nombre de machines')
-    plt.axhline(t_seq, c="red", label = "Temps séquentiel = {}s".format(round(t_seq, 3)), linestyle="--")
+       plt.xlabel('Nombre de machines (travailleurs)')
+    plt.ylabel("Temps d'exécution (en secondes)")
     plt.legend(fontsize=18)
 
     if omp:
@@ -62,7 +62,7 @@ def draw_fig_acceleration(dico, file, n):
 
     for cx, cy in zip(x, y):
         plt.text(cx, cy, '({}, {})'.format(cx, cy))
-    plt.plot(x,lineaire, label="Accélération linéaire", c="red")
+    plt.plot(x,lineaire, label="Accélération linéaire", c="red", linestyle="--")
     plt.plot(x,y, label="Accélération", c="blue")
     plt.legend(fontsize=18)
     
@@ -70,10 +70,10 @@ def draw_fig_acceleration(dico, file, n):
        plt.xlabel('Nombre de threads')
        plt.savefig("graphs/omp/delta_speed/{}".format(file.split(".")[0]))
     elif mpi:
-       plt.xlabel('Nombre de machines')
+       plt.xlabel('Nombre de machines (travailleurs)')
        plt.savefig("graphs/mpi/delta_speed/{}".format(file.split(".")[0]))
     else:
-       plt.xlabel('Nombre de machines')
+       plt.xlabel('Nombre de machines (travailleurs)')
        plt.savefig("graphs/para/delta_speed/{}".format(file.split(".")[0]))
 
 data = open("graphs/graphs.txt", "r")
