@@ -113,7 +113,7 @@ elif argLength == 3:
     if sys.argv[1] == "mpi":
         program = "./exact_cover_mpi"
         cmd = "make mpi=1"
-    elif sys.argv[1] == "para":
+    elif sys.argv[1] == "final":
         program = "./exact_cover_para"
         cmd = "make final=1"
     else:

@@ -3,27 +3,31 @@ Le but du projet est de paralléliser un programme séquentiel, lequel résolvan
 
 ## Compilation : 
 #### La version omp
-- make omp=0/1 debug=0/1
+- en mode debug => *make omp=1 debug=1*
+- en mode release => *make omp=1*
 #### La version mpi
-- make mpi=0/1  debug=0/1 
+- en mode debug => *make mpi=1  debug=1* 
+- en mode release => *make mpi=1* 
 #### La version omp + mpi
-- make final=0/1 debug=0/1
+- en mode debug => *make final=1  debug=1* 
+- en mode release => *make final=1* 
 
 ## Lancement d'un programme :
 #### Séquentiel
-- ./exact_cover --in instances/instance.ec
+- ./exact_cover_seq --in instances/bell12.ec
 #### Parallèle
 Avec n le nombre de machines :
-- mpirun -np n ./exact_cover_version --in instances/instance.ec
+- Version utilisant MPI => mpirun -np n ./exact_cover_mpi --in instances/bell12.ec
+- Version utilisant MPI et OpenMP => mpirun -np n ./exact_cover_para --in instances/bell12.ec
  
 ## Script python 
 #### Création du fichier texte contenant les temps d'exécution et accélération du programme
 Avec n le nombre de machines :
-- python graphG5K omp
-- python graphG5K ompi n
-- python graphG5K final n
+- ./graphG5K omp
+- ./graphG5K mpi n
+- ./graphG5K final n
 
 #### Création des graphs à partir du fichier texte contenant les valeurs à afficher
-- python create_graph omp
-- python create_graph mpi
-- python create_graph final
+- ./create_graphs omp
+- ./create_graphs mpi
+- ./create_graphs final
