@@ -7,17 +7,19 @@ import matplotlib.pyplot as plt
 import json
 
 def draw_fig_temps_exec(dico, file, n, t_seq):
-    title = "INSTANCE : {}\nTemps séquentiel = {}s".format(file, t_seq)
+    title = ""
+    if para:
+        title = "INSTANCE : {} (36 threads par machine)\nTemps séquentiel = {}s".format(file, t_seq)
+    else:
+        title = "INSTANCE : {}\nTemps séquentiel = {}s".format(file, t_seq)
     fig, ax = plt.subplots(figsize=(10,10))
     plt.title(title, fontsize="22")
     dico_list = sorted(dico.items())
     x = []
     y = []
-    lineaire = []
     
     for k,v in dico.items():
         x.append(k)
-        lineaire.append(k)
         y.append(round(v[1], 3))
         plt.scatter(k, v[1], c="blue")
     
@@ -43,7 +45,11 @@ def draw_fig_temps_exec(dico, file, n, t_seq):
        plt.savefig("graphs/para/exec/{}".format(file.split(".")[0]))
 
 def draw_fig_acceleration(dico, file, n):
-    title = "INSTANCE : {}\n".format(file)
+    title = ""
+    if para:
+        title = "INSTANCE : {} (36 threads par machine)\n".format(file)
+    else:
+        title = "INSTANCE : {}\n".format(file)
     fig, ax = plt.subplots(figsize=(10,10))
     plt.title(title, fontsize="22")
     dico_list = sorted(dico.items())
@@ -62,7 +68,8 @@ def draw_fig_acceleration(dico, file, n):
 
     for cx, cy in zip(x, y):
         plt.text(cx, cy, '({}, {})'.format(cx, cy))
-    plt.plot(x,lineaire, label="Accélération linéaire", c="red", linestyle="--")
+    if not para:
+        plt.plot(x,lineaire, label="Accélération linéaire", c="red", linestyle="--")
     plt.plot(x,y, label="Accélération", c="blue")
     plt.legend(fontsize=18)
     
