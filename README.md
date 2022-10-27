@@ -1,5 +1,7 @@
 # Projet HPC Sorbonne : Résolution du problème exact_cover
-Le but du projet est de paralléliser un programme séquentiel, lequel résolvant une instance du problème de la couverture exacte, un problème d’optimisation combinatoire. Il s’agit d’un des 21 problèmes NP-complets de Karp. Ce projet étant une mise en pratique des notions vues au sein de l’UE HPC à l'Université de La Sorbonne. Deux outils sont utilisés pour paralléliser ce programme : MPI et OpenMP.
+Le but du projet est de paralléliser un programme séquentiel, lequel résolvant une instance du problème de la couverture exacte, un problème d’optimisation combinatoire.<br/>
+Il s’agit d’un des 21 problèmes NP-complets de Karp. Ce projet étant une mise en pratique des notions vues au sein de l’UE HPC à l'Université de la Sorbonne.<br/>
+Deux outils sont utilisés pour paralléliser ce programme : MPI et OpenMP.
 
 ## Compilation : 
 #### La version omp
